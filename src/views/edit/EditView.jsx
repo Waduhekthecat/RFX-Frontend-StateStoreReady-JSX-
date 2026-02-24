@@ -1,4 +1,3 @@
-// src/views/edit/EditView.jsx
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { useTransport } from "../../core/transport/TransportProvider";
