@@ -1,4 +1,4 @@
-// src/main.jsx (or src/index.jsx)
+// src/main.jsx
 import React from "react";
 import ReactDOM from "react-dom/client";
 import "./index.css";
@@ -12,13 +12,8 @@ import { PerformView } from "./views/perform/PerformView";
 import { EditView } from "./views/edit/EditView";
 import { PluginView } from "./views/edit/PluginView";
 
-function Placeholder({ title }) {
-  return (
-    <div className="h-full w-full flex items-center justify-center text-white/40 text-xl">
-      {title} View
-    </div>
-  );
-}
+import { RouteView } from "./views/route/RouteView";
+import { SystemView } from "./views/system/SystemView";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
@@ -41,8 +36,9 @@ ReactDOM.createRoot(document.getElementById("root")).render(
               <Route path="plugin/:trackId/:fxId" element={<PluginView />} />
             </Route>
 
-            <Route path="/routing" element={<Placeholder title="Routing" />} />
-            <Route path="/system" element={<Placeholder title="System" />} />
+            {/* ✅ swap placeholders to real views */}
+            <Route path="/routing" element={<RouteView />} />
+            <Route path="/system" element={<SystemView />} />
           </Route>
         </Routes>
       </BrowserRouter>
