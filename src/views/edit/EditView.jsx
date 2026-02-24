@@ -1,0 +1,503 @@
+// src/views/edit/EditView.jsx
+import React from "react";
+import { useNavigate } from "react-router-dom";
+import { useTransport } from "../../core/transport/TransportProvider";
+import { Panel, Inset } from "../../app/components/ui/Panel";
+import { Badge } from "../../app/components/ui/Badge";
+import { InstalledFxShell } from "./components/installedFxShell";
+import { Outlet, useLocation } from "react-router-dom";
+function useVM() {
+  const t = useTransport();
+  const [vm, setVm] = React.useState(() => t.getSnapshot());
+  React.useEffect(() => t.subscribe(setVm), [t]);
+  return vm;
+}
+
+// ---------------------------
+// Routing helpers
+// ---------------------------
+function normalizeMode(m) {
+  const x = String(m || "linear").toLowerCase();
+  if (x === "lcr") return "lcr";
+  if (x === "parallel") return "parallel";
+  return "linear";
+}
+
+function lanesForMode(mode) {
+  const m = normalizeMode(mode);
+  if (m === "lcr") return { A: true, B: true, C: true };
+  if (m === "parallel") return { A: true, B: true, C: false };
+  return { A: true, B: false, C: false };
+}
+
+function availableLanes(mode) {
+  const on = lanesForMode(mode);
+  const out = [];
+  if (on.A) out.push("A");
+  if (on.B) out.push("B");
+  if (on.C) out.push("C");
+  return out;
+}
+
+function nextValidLane(mode, preferred) {
+  const lanes = availableLanes(mode);
+  if (preferred && lanes.includes(preferred)) return preferred;
+  return lanes[0] || "A";
+}
+
+// ---------------------------
+// Id helpers
+// ---------------------------
+function uid(prefix = "id") {
+  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
+}
+
+// ---------------------------
+// UI bits
+// ---------------------------
+function SegButton({ active, disabled, children, onClick }) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={[
+        "px-3 py-2 rounded-xl border text-[12px] font-semibold tracking-wide",
+        "transition",
+        disabled ? "opacity-35 cursor-not-allowed" : "hover:bg-white/10",
+        active
+          ? "bg-white/12 border-white/20 text-white"
+          : "bg-white/5 border-white/10 text-white/70",
+      ].join(" ")}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ModeSelector({ mode, onChange }) {
+  const m = normalizeMode(mode);
+  return (
+    <div className="flex items-center gap-2">
+      <SegButton active={m === "linear"} onClick={() => onChange("linear")}>
+        LINEAR
+      </SegButton>
+      <SegButton active={m === "parallel"} onClick={() => onChange("parallel")}>
+        PAR
+      </SegButton>
+      <SegButton active={m === "lcr"} onClick={() => onChange("lcr")}>
+        LCR
+      </SegButton>
+    </div>
+  );
+}
+
+/**
+ * TrackSelector (was LaneSelector)
+ * - Label says TRACK
+ * - Shows only valid tracks for the current routing mode
+ */
+function TrackSelector({ busId, mode, lane, onChange }) {
+  const lanes = availableLanes(mode);
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="text-[11px] text-white/50 tracking-wide mr-1">TRACK</div>
+
+      {lanes.map((L) => (
+        <SegButton key={L} active={lane === L} onClick={() => onChange(L)}>
+          {busId}{L}
+        </SegButton>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------
+// Left plugin chain (max 5, reorder, toggle, remove, params)
+// ---------------------------
+const PLUGIN_MAX = 5;
+
+function Grip() {
+  return (
+    <div
+      className={[
+        "w-10 h-full rounded-xl border border-white/10 bg-white/5",
+        "flex items-center justify-center",
+      ].join(" ")}
+      title="Drag to reorder"
+    >
+      <div className="flex flex-col gap-1 opacity-70">
+        <div className="w-4 h-0.5 bg-white/35 rounded" />
+        <div className="w-4 h-0.5 bg-white/35 rounded" />
+        <div className="w-4 h-0.5 bg-white/35 rounded" />
+      </div>
+    </div>
+  );
+}
+
+function SmallIconButton({ title, onClick, disabled, children }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      disabled={disabled}
+      className={[
+        "h-8 px-2 rounded-lg border text-[12px] font-semibold",
+        "transition",
+        disabled ? "opacity-35 cursor-not-allowed" : "hover:bg-white/10",
+        "bg-white/5 border-white/10 text-white/80",
+      ].join(" ")}
+    >
+      {children}
+    </button>
+  );
+}
+
+function PluginCard({
+  fx,
+  index,
+  canDrag,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onToggle,
+  onRemove,
+  onParams,
+}) {
+  return (
+    <div
+      draggable={canDrag}
+      onDragStart={(e) => onDragStart?.(e, fx.id)}
+      onDragOver={(e) => onDragOver?.(e, fx.id)}
+      onDrop={(e) => onDrop?.(e, fx.id)}
+      className={[
+        "flex items-stretch gap-3",
+        "px-3 py-3 rounded-2xl border border-white/10 bg-white/5",
+        "min-h-[84px]", // taller to match installed list feel
+      ].join(" ")}
+    >
+      {/* index */}
+      <div className="w-6 text-[11px] text-white/45 tabular-nums pt-1">{index}</div>
+
+      {/* main */}
+      <div className="flex-1 min-w-0 py-0.5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-[14px] font-semibold leading-tight truncate">
+              {fx.name}
+            </div>
+            <div className="text-[11px] text-white/45 leading-tight truncate">
+              {fx.vendor}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => onToggle?.(fx.id)}
+              className="rounded-full"
+              title="Toggle enable"
+            >
+              <Badge tone={fx.enabled ? "active" : "neutral"} className="text-[10px]">
+                {fx.enabled ? "ON" : "OFF"}
+              </Badge>
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <SmallIconButton title="Edit parameters" onClick={() => onParams?.(fx.id)}>
+              PARAMS
+            </SmallIconButton>
+            <SmallIconButton title="Remove plugin" onClick={() => onRemove?.(fx.id)}>
+              REMOVE
+            </SmallIconButton>
+          </div>
+          <div className="text-[10px] text-white/35">FX SLOT</div>
+        </div>
+      </div>
+
+      {/* drag handle */}
+      <div className="shrink-0">
+        <Grip />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * TrackDetailCard
+ * - LEFT: editable chain (max 5, reorder, toggle, remove, params)
+ * - RIGHT: installed plugin list from rfx_plugin_list.json
+ */
+function TrackDetailCard({ trackId }) {
+  const t = useTransport();
+  const nav = useNavigate();
+
+  // per-track chains live here (keyed by trackId)
+  const [chainsByTrack, setChainsByTrack] = React.useState(() => ({}));
+  const chain = chainsByTrack[trackId] || [];
+
+  // keep a drag source id in a ref (no re-render needed)
+  const dragSrcIdRef = React.useRef(null);
+
+  // When switching tracks, ensure it at least has an array
+  React.useEffect(() => {
+    setChainsByTrack((prev) => {
+      if (prev[trackId]) return prev;
+      return { ...prev, [trackId]: [] };
+    });
+  }, [trackId]);
+
+  function setChain(next) {
+    setChainsByTrack((prev) => ({ ...prev, [trackId]: next }));
+  }
+
+  function addFromInstalled(picked) {
+    setChainsByTrack((prev) => {
+      const cur = prev[trackId] || [];
+      if (cur.length >= PLUGIN_MAX) return prev;
+
+      const nextFx = {
+        id: uid("fx"),
+        // keep some extra fields around for later syscall mapping
+        pluginId: picked?.id,
+        raw: picked?.raw,
+        vendor: String(picked?.vendor || "").trim() || "Unknown",
+        name: String(picked?.name || picked?.raw || "Plugin").trim(),
+        enabled: true,
+      };
+
+      const next = [...cur, nextFx];
+      return { ...prev, [trackId]: next };
+    });
+
+    // later: send syscall to REAPER
+    // t.syscall({ name: "addFx", trackId, pluginId: picked.id, raw: picked.raw })
+    console.log("add fx", { trackId, picked });
+  }
+
+  function toggleFx(fxId) {
+    setChain(
+      chain.map((fx) => (fx.id === fxId ? { ...fx, enabled: !fx.enabled } : fx))
+    );
+
+    // later: syscall
+    // t.syscall({ name: "toggleFx", trackId, fxId })
+    console.log("toggle fx", { trackId, fxId });
+  }
+
+  function removeFx(fxId) {
+    setChain(chain.filter((fx) => fx.id !== fxId));
+
+    // later: syscall
+    // t.syscall({ name: "removeFx", trackId, fxId })
+    console.log("remove fx", { trackId, fxId });
+  }
+
+  function reorderFx(srcId, dstId) {
+    if (!srcId || !dstId || srcId === dstId) return;
+    const srcIdx = chain.findIndex((x) => x.id === srcId);
+    const dstIdx = chain.findIndex((x) => x.id === dstId);
+    if (srcIdx < 0 || dstIdx < 0) return;
+
+    const next = chain.slice();
+    const [moved] = next.splice(srcIdx, 1);
+    next.splice(dstIdx, 0, moved);
+    setChain(next);
+
+    // later: syscall
+    // t.syscall({ name: "reorderFx", trackId, from: srcIdx, to: dstIdx })
+    console.log("reorder fx", { trackId, from: srcIdx, to: dstIdx });
+  }
+
+  function goParams(fxId) {
+    // Sub-view of Edit (no modal). You’ll add a Route for this path.
+    // Example:
+    // <Route path="/edit" element={<EditView />}>
+    //   <Route path="plugin/:trackId/:fxId" element={<PluginView />} />
+    // </Route>
+    nav(`/edit/plugin/${encodeURIComponent(trackId)}/${encodeURIComponent(fxId)}`);
+  }
+
+  // HTML5 DnD handlers
+  function onDragStart(e, fxId) {
+    dragSrcIdRef.current = fxId;
+    e.dataTransfer.effectAllowed = "move";
+    try {
+      e.dataTransfer.setData("text/plain", fxId);
+    } catch { }
+  }
+  function onDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  }
+  function onDrop(e, dstId) {
+    e.preventDefault();
+    const srcId =
+      dragSrcIdRef.current ||
+      (() => {
+        try {
+          return e.dataTransfer.getData("text/plain");
+        } catch {
+          return null;
+        }
+      })();
+
+    dragSrcIdRef.current = null;
+    reorderFx(srcId, dstId);
+  }
+
+  const isFull = chain.length >= PLUGIN_MAX;
+
+  return (
+    <Panel className="h-full min-h-0 flex flex-col">
+      <div className="p-4 flex-1 min-h-0">
+        <div className="grid grid-cols-12 gap-3 h-full min-h-0">
+          {/* LEFT: track chain */}
+          <Inset className="col-span-7 h-full min-h-0 p-3 flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="text-[11px] font-semibold tracking-wide text-white/70">
+                  PLUGINS
+                </div>
+                <div className="text-[10px] text-white/35">
+                  {chain.length}/{PLUGIN_MAX}
+                </div>
+                {isFull ? (
+                  <Badge tone="neutral" className="text-[10px]">
+                    MAX
+                  </Badge>
+                ) : null}
+              </div>
+
+              <div className="text-[10px] text-white/35">
+                Drag to reorder • Click ON/OFF to toggle
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 overflow-auto min-h-0 pr-1">
+              {chain.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-white/35 text-[12px] border border-dashed border-white/10 rounded-2xl">
+                  Pick a plugin on the right to add (max {PLUGIN_MAX})
+                </div>
+              ) : (
+                chain.map((fx, i) => (
+                  <PluginCard
+                    key={fx.id}
+                    fx={fx}
+                    index={i + 1}
+                    canDrag={chain.length > 1}
+                    onDragStart={onDragStart}
+                    onDragOver={onDragOver}
+                    onDrop={onDrop}
+                    onToggle={toggleFx}
+                    onRemove={removeFx}
+                    onParams={goParams}
+                  />
+                ))
+              )}
+            </div>
+          </Inset>
+
+          {/* RIGHT: installed plugins */}
+          <div className="col-span-5 h-full min-h-0">
+            <InstalledFxShell
+              className="h-full"
+              onPick={(p) => {
+                if (isFull) {
+                  console.warn(`Plugin chain is full (max ${PLUGIN_MAX}).`);
+                  return;
+                }
+                addFromInstalled(p);
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+// ---------------------------
+// EditView
+// ---------------------------
+export function EditView() {
+  const location = useLocation();
+  const inPluginSubView = location.pathname.startsWith("/edit/plugin/");
+  if (inPluginSubView) return <Outlet />;
+  const t = useTransport();
+  const vm = useVM();
+
+  const activeBusId = vm.activeBusId || vm.buses?.[0]?.id || "FX_1";
+  const bus =
+    vm.buses?.find?.((b) => b.id === activeBusId) || {
+      id: activeBusId,
+      label: activeBusId,
+    };
+
+  const mode = normalizeMode((vm.busModes && vm.busModes[bus.id]) || "linear");
+
+  // remember selected track lane per bus
+  const [laneByBus, setLaneByBus] = React.useState({});
+  const lane = nextValidLane(mode, laneByBus[bus.id]);
+
+  // keep selection valid when mode changes
+  React.useEffect(() => {
+    setLaneByBus((prev) => {
+      const next = { ...prev };
+      next[bus.id] = nextValidLane(mode, next[bus.id]);
+      return next;
+    });
+  }, [bus.id, mode]);
+
+  function setLane(L) {
+    setLaneByBus((prev) => ({ ...prev, [bus.id]: L }));
+  }
+
+  function setMode(nextMode) {
+    const m = normalizeMode(nextMode);
+    t.syscall({ name: "setStateMode", busId: bus.id, mode: m });
+  }
+
+  const trackId = `${bus.id}_${lane}`;
+
+  return (
+    <div className="h-full w-full p-3 min-h-0">
+      <div className="h-full min-h-0 flex flex-col gap-3">
+        {/* TOP CONTROL BAR */}
+        <Panel className="min-h-0">
+          <div className="px-4 py-3 flex items-center justify-between gap-3">
+            {/* LEFT: title + track selector */}
+            <div className="flex items-center gap-4 min-w-0">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="text-[18px] font-semibold tracking-wide truncate">
+                  EDIT • {bus.label}
+                </div>
+                <Badge tone="active">Active Bus</Badge>
+              </div>
+
+              <div className="h-6 w-px bg-white/10" />
+
+              <TrackSelector busId={bus.id} mode={mode} lane={lane} onChange={setLane} />
+            </div>
+
+            {/* RIGHT: mode selector only */}
+            <div className="flex items-center gap-2">
+              <div className="text-[11px] text-white/50 tracking-wide">MODE</div>
+              <ModeSelector mode={mode} onChange={setMode} />
+            </div>
+          </div>
+        </Panel>
+
+        {/* MAIN DETAIL CARD */}
+        <div className="flex-1 min-h-0">
+          <TrackDetailCard trackId={trackId} />
+        </div>
+      </div>
+    </div>
+  );
+}
