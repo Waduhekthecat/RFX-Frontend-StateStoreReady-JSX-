@@ -66,8 +66,8 @@ export function normalize(view) {
         return {
             snapshot: {
                 seq: Number(view.seq || 0),
-                schema: "mock_vm_v1",
-                ts: 0,
+                schema: String(view.schema || "mock_vm"),
+                ts: Number(view.ts || 0),
             },
             reaper: { version: "mock", resourcePath: "" },
             project: { name: "Mock", path: "", templateVersion: "mock" },
