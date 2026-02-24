@@ -1,5 +1,7 @@
+// src/views/perform/PerformView.jsx
 import React from "react";
 import { useTransport } from "../../core/transport/TransportProvider";
+import { useRfxStore } from "../../core/rfx/Store";
 import { KnobRow } from "../../app/components/knobs/KnobRow";
 import { Panel } from "../../app/components/ui/Panel";
 import { BusCardArea } from "./components/BusCardArea";
@@ -20,18 +22,18 @@ function knobsForContext(ctx) {
   }));
 }
 
-// ✅ temporary helper until routingMode comes from vm.buses / view.json
-function mockRoutingModeForBus(busId) {
-  if (busId === "FX_1") return "linear";
-  if (busId === "FX_2") return "parallel";
-  if (busId === "FX_3") return "lcr";
-  if (busId === "FX_4") return "parallel";
+function normalizeMode(m) {
+  const x = String(m || "linear").toLowerCase();
+  if (x === "lcr") return "lcr";
+  if (x === "parallel") return "parallel";
   return "linear";
 }
 
 export function PerformView() {
-  const t = useTransport();
   const vm = useVM();
+
+  // ✅ Core mutation entrypoint
+  const dispatchIntent = useRfxStore((s) => s.dispatchIntent);
 
   const activeId = vm.activeBusId || "NONE";
   const knobs = React.useMemo(() => knobsForContext(activeId), [activeId]);
@@ -45,9 +47,11 @@ export function PerformView() {
         <div className="flex-1 min-h-0">
           <BusCardArea
             vm={vm}
-            getRoutingMode={(busId) => mockRoutingModeForBus(busId)}
+            // ✅ routing mode now comes from VM (mock) instead of hardcoded helper
+            getRoutingMode={(busId) => normalizeMode(vm?.busModes?.[busId] || "linear")}
+            // ✅ was transport.syscall → now dispatchIntent
             onSelectBus={(busId) =>
-              t.syscall({ name: "selectActiveBus", busId })
+              dispatchIntent({ name: "selectActiveBus", busId })
             }
           />
         </div>

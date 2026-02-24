@@ -1,10 +1,12 @@
+// src/views/edit/EditView.jsx
 import React from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Outlet, useLocation } from "react-router-dom";
 import { useTransport } from "../../core/transport/TransportProvider";
+import { useRfxStore } from "../../core/rfx/Store";
 import { Panel, Inset } from "../../app/components/ui/Panel";
 import { Badge } from "../../app/components/ui/Badge";
 import { InstalledFxShell } from "./components/installedFxShell";
-import { Outlet, useLocation } from "react-router-dom";
+
 function useVM() {
   const t = useTransport();
   const [vm, setVm] = React.useState(() => t.getSnapshot());
@@ -105,7 +107,8 @@ function TrackSelector({ busId, mode, lane, onChange }) {
 
       {lanes.map((L) => (
         <SegButton key={L} active={lane === L} onClick={() => onChange(L)}>
-          {busId}{L}
+          {busId}
+          {L}
         </SegButton>
       ))}
     </div>
@@ -169,18 +172,16 @@ function PluginCard({
     <div
       draggable={canDrag}
       onDragStart={(e) => onDragStart?.(e, fx.id)}
-      onDragOver={(e) => onDragOver?.(e, fx.id)}
+      onDragOver={(e) => onDragOver?.(e)}
       onDrop={(e) => onDrop?.(e, fx.id)}
       className={[
         "flex items-stretch gap-3",
         "px-3 py-3 rounded-2xl border border-white/10 bg-white/5",
-        "min-h-[84px]", // taller to match installed list feel
+        "min-h-[84px]",
       ].join(" ")}
     >
-      {/* index */}
       <div className="w-6 text-[11px] text-white/45 tabular-nums pt-1">{index}</div>
 
-      {/* main */}
       <div className="flex-1 min-w-0 py-0.5">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
@@ -219,7 +220,6 @@ function PluginCard({
         </div>
       </div>
 
-      {/* drag handle */}
       <div className="shrink-0">
         <Grip />
       </div>
@@ -229,21 +229,15 @@ function PluginCard({
 
 /**
  * TrackDetailCard
- * - LEFT: editable chain (max 5, reorder, toggle, remove, params)
- * - RIGHT: installed plugin list from rfx_plugin_list.json
+ * (still local-only for now — we’ll wire these into dispatch later)
  */
 function TrackDetailCard({ trackId }) {
-  const t = useTransport();
   const nav = useNavigate();
 
-  // per-track chains live here (keyed by trackId)
   const [chainsByTrack, setChainsByTrack] = React.useState(() => ({}));
   const chain = chainsByTrack[trackId] || [];
-
-  // keep a drag source id in a ref (no re-render needed)
   const dragSrcIdRef = React.useRef(null);
 
-  // When switching tracks, ensure it at least has an array
   React.useEffect(() => {
     setChainsByTrack((prev) => {
       if (prev[trackId]) return prev;
@@ -262,7 +256,6 @@ function TrackDetailCard({ trackId }) {
 
       const nextFx = {
         id: uid("fx"),
-        // keep some extra fields around for later syscall mapping
         pluginId: picked?.id,
         raw: picked?.raw,
         vendor: String(picked?.vendor || "").trim() || "Unknown",
@@ -274,26 +267,16 @@ function TrackDetailCard({ trackId }) {
       return { ...prev, [trackId]: next };
     });
 
-    // later: send syscall to REAPER
-    // t.syscall({ name: "addFx", trackId, pluginId: picked.id, raw: picked.raw })
     console.log("add fx", { trackId, picked });
   }
 
   function toggleFx(fxId) {
-    setChain(
-      chain.map((fx) => (fx.id === fxId ? { ...fx, enabled: !fx.enabled } : fx))
-    );
-
-    // later: syscall
-    // t.syscall({ name: "toggleFx", trackId, fxId })
+    setChain(chain.map((fx) => (fx.id === fxId ? { ...fx, enabled: !fx.enabled } : fx)));
     console.log("toggle fx", { trackId, fxId });
   }
 
   function removeFx(fxId) {
     setChain(chain.filter((fx) => fx.id !== fxId));
-
-    // later: syscall
-    // t.syscall({ name: "removeFx", trackId, fxId })
     console.log("remove fx", { trackId, fxId });
   }
 
@@ -308,27 +291,19 @@ function TrackDetailCard({ trackId }) {
     next.splice(dstIdx, 0, moved);
     setChain(next);
 
-    // later: syscall
-    // t.syscall({ name: "reorderFx", trackId, from: srcIdx, to: dstIdx })
     console.log("reorder fx", { trackId, from: srcIdx, to: dstIdx });
   }
 
   function goParams(fxId) {
-    // Sub-view of Edit (no modal). You’ll add a Route for this path.
-    // Example:
-    // <Route path="/edit" element={<EditView />}>
-    //   <Route path="plugin/:trackId/:fxId" element={<PluginView />} />
-    // </Route>
     nav(`/edit/plugin/${encodeURIComponent(trackId)}/${encodeURIComponent(fxId)}`);
   }
 
-  // HTML5 DnD handlers
   function onDragStart(e, fxId) {
     dragSrcIdRef.current = fxId;
     e.dataTransfer.effectAllowed = "move";
     try {
       e.dataTransfer.setData("text/plain", fxId);
-    } catch { }
+    } catch {}
   }
   function onDragOver(e) {
     e.preventDefault();
@@ -356,7 +331,6 @@ function TrackDetailCard({ trackId }) {
     <Panel className="h-full min-h-0 flex flex-col">
       <div className="p-4 flex-1 min-h-0">
         <div className="grid grid-cols-12 gap-3 h-full min-h-0">
-          {/* LEFT: track chain */}
           <Inset className="col-span-7 h-full min-h-0 p-3 flex flex-col gap-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -402,7 +376,6 @@ function TrackDetailCard({ trackId }) {
             </div>
           </Inset>
 
-          {/* RIGHT: installed plugins */}
           <div className="col-span-5 h-full min-h-0">
             <InstalledFxShell
               className="h-full"
@@ -428,8 +401,11 @@ export function EditView() {
   const location = useLocation();
   const inPluginSubView = location.pathname.startsWith("/edit/plugin/");
   if (inPluginSubView) return <Outlet />;
-  const t = useTransport();
+
   const vm = useVM();
+
+  // ✅ Core mutation entrypoint
+  const dispatchIntent = useRfxStore((s) => s.dispatchIntent);
 
   const activeBusId = vm.activeBusId || vm.buses?.[0]?.id || "FX_1";
   const bus =
@@ -440,11 +416,9 @@ export function EditView() {
 
   const mode = normalizeMode((vm.busModes && vm.busModes[bus.id]) || "linear");
 
-  // remember selected track lane per bus
   const [laneByBus, setLaneByBus] = React.useState({});
   const lane = nextValidLane(mode, laneByBus[bus.id]);
 
-  // keep selection valid when mode changes
   React.useEffect(() => {
     setLaneByBus((prev) => {
       const next = { ...prev };
@@ -459,7 +433,10 @@ export function EditView() {
 
   function setMode(nextMode) {
     const m = normalizeMode(nextMode);
-    t.syscall({ name: "setStateMode", busId: bus.id, mode: m });
+
+    // ✅ was transport.syscall({ name:"setStateMode"... })
+    // now: canonical intent
+    dispatchIntent({ name: "setRoutingMode", busId: bus.id, mode: m });
   }
 
   const trackId = `${bus.id}_${lane}`;
@@ -467,10 +444,8 @@ export function EditView() {
   return (
     <div className="h-full w-full p-3 min-h-0">
       <div className="h-full min-h-0 flex flex-col gap-3">
-        {/* TOP CONTROL BAR */}
         <Panel className="min-h-0">
           <div className="px-4 py-3 flex items-center justify-between gap-3">
-            {/* LEFT: title + track selector */}
             <div className="flex items-center gap-4 min-w-0">
               <div className="flex items-center gap-3 min-w-0">
                 <div className="text-[18px] font-semibold tracking-wide truncate">
@@ -484,7 +459,6 @@ export function EditView() {
               <TrackSelector busId={bus.id} mode={mode} lane={lane} onChange={setLane} />
             </div>
 
-            {/* RIGHT: mode selector only */}
             <div className="flex items-center gap-2">
               <div className="text-[11px] text-white/50 tracking-wide">MODE</div>
               <ModeSelector mode={mode} onChange={setMode} />
@@ -492,7 +466,6 @@ export function EditView() {
           </div>
         </Panel>
 
-        {/* MAIN DETAIL CARD */}
         <div className="flex-1 min-h-0">
           <TrackDetailCard trackId={trackId} />
         </div>

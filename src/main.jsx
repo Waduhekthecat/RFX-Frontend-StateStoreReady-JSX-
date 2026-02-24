@@ -13,9 +13,9 @@ import { Nav } from "./app/components/nav/Nav";
 import { PerformView } from "./views/perform/PerformView";
 import { EditView } from "./views/edit/EditView";
 import { PluginView } from "./views/edit/PluginView";
-
 import { RouteView } from "./views/route/RouteView";
 import { SystemView } from "./views/system/SystemView";
+import { CoreInspectorView } from "./views/dev/CoreInspectorView";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
@@ -42,6 +42,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
               {/* ✅ swap placeholders to real views */}
               <Route path="/routing" element={<RouteView />} />
               <Route path="/system" element={<SystemView />} />
+              <Route path="/dev/core" element={<CoreInspectorView />} />
             </Route>
           </Routes>
         </BrowserRouter>

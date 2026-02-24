@@ -1,3 +1,5 @@
+// src/core/transport/MockTransport.js
+
 function clamp01(n) {
   const v = Number(n);
   if (!Number.isFinite(v)) return 0;
@@ -6,27 +8,65 @@ function clamp01(n) {
   return v;
 }
 
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function nowSec() {
+  return Math.floor(Date.now() / 1000);
+}
+
+function normalizeMode(m) {
+  const x = String(m || "linear").toLowerCase();
+  if (x === "lcr") return "lcr";
+  if (x === "parallel") return "parallel";
+  return "linear";
+}
+
 export function createMockTransportContractDocs() {
   return {
     ViewModel: {
+      schemaVersion: 1,
+      schema: "mock_vm_v2",
+      seq: 1,
+      ts: 1234567890,
+      capabilities: {
+        routingModes: ["linear", "parallel", "lcr"],
+        // Optional: let UI know some busses might not support B/C
+        // laneSupportByBusId: { FX_1: ["A","B","C"], FX_2: ["A","B"], ... }
+      },
+
       buses: [{ id: "FX_1", label: "FX_1", busNum: 1 }],
       activeBusId: "FX_1",
+
       // ✅ routing modes by bus id
       busModes: { FX_1: "linear" },
+
       meters: { FX_1: { l: 0.1, r: 0.1 } },
     },
     Syscalls: ["selectActiveBus", "setStateMode", "syncView"],
   };
 }
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
+/**
+ * Mock transport contract:
+ *  - boot(): async handshake
+ *  - getSnapshot(): returns current VM
+ *  - subscribe(cb): pushes VM updates
+ *  - syscall(call): mutates VM and emits
+ */
 export function createMockTransport() {
-  let seq = 0;
+  let seq = 1;
 
   let vm = {
+    schemaVersion: 1,
+    schema: "mock_vm_v2",
+    seq,
+    ts: nowSec(),
+    capabilities: {
+      routingModes: ["linear", "parallel", "lcr"],
+    },
+
     buses: [
       { id: "FX_1", label: "FX_1", busNum: 1 },
       { id: "FX_2", label: "FX_2", busNum: 2 },
@@ -54,7 +94,7 @@ export function createMockTransport() {
   const subs = new Set();
   const emit = () => subs.forEach((cb) => cb(vm));
 
-  // Fake meter updates: animate ONLY active bus (matches your real perf goal)
+  // Fake meter updates: animate ONLY active bus (does NOT bump seq)
   window.setInterval(() => {
     const id = vm.activeBusId;
     if (!id) return;
@@ -69,21 +109,17 @@ export function createMockTransport() {
     emit();
   }, 60);
 
-  function normalizeMode(m) {
-    const x = String(m || "linear").toLowerCase();
-    if (x === "lcr") return "lcr";
-    if (x === "parallel") return "parallel";
-    return "linear";
+  function bumpSeq() {
+    seq += 1;
+    vm = { ...vm, seq, ts: nowSec() };
   }
 
   return {
-    // ✅ NEW: placeholder boot handshake
     async boot() {
-      // simulate “launch”
       await sleep(600);
-      // simulate “await /rfx/ready”
       await sleep(900);
-      seq += 1;
+      bumpSeq();
+      emit();
       return { ok: true, seq };
     },
 
@@ -101,17 +137,19 @@ export function createMockTransport() {
       if (!call || !call.name) return;
 
       if (call.name === "selectActiveBus") {
+        bumpSeq();
         vm = { ...vm, activeBusId: call.busId };
         emit();
         return;
       }
 
-      // ✅ supports your EditView routing selector
+      // supports your EditView routing selector
       // Accepts { name:"setStateMode", busId } OR { stateId }
-      if (call.name === "setStateMode") {
-        const id = call.busId || call.stateId;
+      if (call.name === "setRoutingMode") {
+        const id = call.busId;
         if (!id) return;
 
+        bumpSeq();
         const mode = normalizeMode(call.mode);
         vm = { ...vm, busModes: { ...vm.busModes, [id]: mode } };
         emit();
@@ -119,6 +157,7 @@ export function createMockTransport() {
       }
 
       if (call.name === "syncView") {
+        bumpSeq();
         emit();
         return;
       }

@@ -1,8 +1,9 @@
+// src/app/components/nav/Nav.jsx
 import React from "react";
 import { NavLink } from "react-router-dom";
 import { useTransport } from "../../../core/transport/TransportProvider";
 
-const tabs = [
+const BASE_TABS = [
   { label: "Perform", to: "/" },
   { label: "Edit", to: "/edit" },
   { label: "Routing", to: "/routing" },
@@ -52,6 +53,12 @@ function ModeBadge({ mode }) {
 export function Nav() {
   const vm = useVM();
 
+  // ✅ dev-only tab
+  const tabs = React.useMemo(() => {
+    const devTab = import.meta.env.DEV ? [{ label: "Core", to: "/dev/core" }] : [];
+    return [...BASE_TABS, ...devTab];
+  }, []);
+
   const activeBusId = vm.activeBusId || "FX_1";
   const mode = normalizeMode(vm.busModes?.[activeBusId] || "linear");
 
@@ -66,9 +73,7 @@ export function Nav() {
 
         <div className="flex items-center gap-2">
           <span className="text-xs opacity-60">Active</span>
-          <span className="text-[12px] font-semibold tracking-wide">
-            {activeBusId}
-          </span>
+          <span className="text-[12px] font-semibold tracking-wide">{activeBusId}</span>
           <ModeBadge mode={mode} />
         </div>
       </div>

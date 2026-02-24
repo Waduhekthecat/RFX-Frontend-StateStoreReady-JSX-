@@ -152,7 +152,8 @@ background: rgba(255,255,255,0.36);
 
 img {
 -webkit-user-drag: none;
-user-drag: none;
+user-select: none;
+-webkit-user-select: none;
 }
 
 /* Optional but recommended for touchscreen feel */

@@ -5,270 +5,407 @@ import { buildOptimistic } from "./Optimistic";
 import { reconcilePending } from "./Reconcile";
 import { uid, nowMs } from "./Util";
 
-export const useRfxStore = create((set, get) => ({
-  // ---------------------------
-  // Wiring: we will call transport.syscall(call)
-  // ---------------------------
-  transport: null,
-  setTransport: (transport) => set({ transport }),
+const MAX_EVENT_LOG = 300;
 
-  // ---------------------------
-  // Snapshot meta
-  // ---------------------------
-  snapshot: {
-    seq: 0,
-    schema: "none",
-    ts: 0,
-    receivedAtMs: 0,
-  },
+// ---------------------------
+// Event log helpers
+// ---------------------------
+function pushBounded(list, item, max = MAX_EVENT_LOG) {
+    const next = [...(list || []), item];
+    if (next.length <= max) return next;
+    return next.slice(next.length - max);
+}
 
-  reaper: { version: "unknown", resourcePath: "" },
-  project: { name: "", path: "", templateVersion: "unknown" },
-  transportState: null,
-  selection: { selectedTrackIndex: -1 },
+function summarizeTransitions(prevPendingById, nextPendingById, idsInOrder) {
+    const out = {
+        acked: [],
+        timeout: [],
+        failed: [],
+        superseded: [],
+        stillPending: 0,
+    };
 
-  // ---------------------------
-  // Normalized entities
-  // ---------------------------
-  entities: {
-    tracksByGuid: {},
-    trackOrder: [],
+    for (const id of idsInOrder || []) {
+        const a = prevPendingById?.[id];
+        const b = nextPendingById?.[id];
+        if (!a || !b) continue;
 
-    fxByGuid: {},
-    fxOrderByTrackGuid: {},
+        const from = String(a.status || "");
+        const to = String(b.status || "");
 
-    routesById: {},
-    routeIdsByTrackGuid: {},
-  },
+        if (from === to) {
+            if (to === "queued" || to === "sent") out.stillPending += 1;
+            continue;
+        }
 
-  // Perf-ish / VM compatibility (so current PerformView can keep working)
-  perf: {
-    buses: null,
-    activeBusId: null,
-    busModesById: null,
-    metersById: null,
-  },
+        const row = {
+            id,
+            kind: b.kind,
+            from,
+            to,
+            error: b.error || null,
+            ackSeq: b.ackSeq || null,
+        };
 
-  // ---------------------------
-  // RFX-owned session state
-  // ---------------------------
-  session: {
-    activeTrackGuid: null,   // “active bus” concept
-    selectedTrackGuid: null, // selection mirror
-    selectedFxGuid: null,
-  },
-
-  // ---------------------------
-  // Pending operations + overlay
-  // ---------------------------
-  ops: {
-    pendingById: {},
-    pendingOrder: [],
-    overlay: {
-      track: {},
-      fx: {},
-      fxOrderByTrackGuid: {},
-    },
-    lastError: null,
-  },
-
-  // ============================================================
-  // Selectors (helpers)
-  // ============================================================
-  selectTrackEffective: (trackGuid) => {
-    const st = get();
-    const base = st.entities.tracksByGuid[trackGuid];
-    if (!base) return null;
-    const patch = st.ops.overlay.track[trackGuid];
-    return patch ? { ...base, ...patch } : base;
-  },
-
-  selectFxOrderEffective: (trackGuid) => {
-    const st = get();
-    return (
-      st.ops.overlay.fxOrderByTrackGuid[trackGuid] ||
-      st.entities.fxOrderByTrackGuid[trackGuid] ||
-      []
-    );
-  },
-
-  selectFxEffective: (fxGuid) => {
-    const st = get();
-    const base = st.entities.fxByGuid[fxGuid];
-    if (!base) return null;
-    const patch = st.ops.overlay.fx[fxGuid];
-    return patch ? { ...base, ...patch } : base;
-  },
-
-  // ============================================================
-  // Ingest snapshot (Transport -> Core)
-  // ============================================================
-  ingestSnapshot: (viewJsonOrVm) => {
-    const receivedAtMs = nowMs();
-    const norm = normalize(viewJsonOrVm);
-
-    set((s) => {
-      const { nextOps } = reconcilePending(s, norm);
-
-      // selection -> guid
-      let selectedGuid = s.session.selectedTrackGuid;
-      const idx = Number(norm?.selection?.selectedTrackIndex ?? -1);
-      if (idx >= 0) selectedGuid = norm.entities.trackOrder[idx] || null;
-      else selectedGuid = null;
-
-      // active track fallback logic
-      let activeGuid = s.session.activeTrackGuid;
-
-      // If VM-style "active bus" exists, prefer it
-      const vmActive = norm?.perf?.activeBusId;
-      if (vmActive) activeGuid = vmActive;
-
-      if (activeGuid && !norm.entities.tracksByGuid[activeGuid]) activeGuid = null;
-      if (!activeGuid) activeGuid = selectedGuid || norm.entities.trackOrder[0] || null;
-
-      return {
-        snapshot: {
-          seq: norm.snapshot.seq,
-          schema: norm.snapshot.schema,
-          ts: norm.snapshot.ts,
-          receivedAtMs,
-        },
-        reaper: norm.reaper,
-        project: norm.project,
-        transportState: norm.transportState,
-        selection: norm.selection,
-        entities: norm.entities,
-
-        perf: norm.perf
-          ? {
-              buses: norm.perf.buses,
-              activeBusId: norm.perf.activeBusId,
-              busModesById: norm.perf.busModesById,
-              metersById: norm.perf.metersById,
-            }
-          : s.perf,
-
-        session: {
-          ...s.session,
-          activeTrackGuid: activeGuid,
-          selectedTrackGuid: selectedGuid,
-        },
-        ops: nextOps,
-      };
-    });
-  },
-
-  // ============================================================
-  // Mutation pipeline entrypoint (UI -> Core)
-  // ============================================================
-  dispatchIntent: async (intent) => {
-    const st = get();
-    const transport = st.transport;
-
-    // Allow either:
-    //  - { name: "selectActiveBus", busId: "FX_2" }  (current transport)
-    //  - { kind: "selectActiveBus", busId: "FX_2" }  (older style)
-    const call = coerceToTransportCall(intent);
-    if (!call || !call.name) return;
-
-    const opId = uid("op");
-    const createdAtMs = nowMs();
-
-    const optimistic = buildOptimistic(st, intent);
-
-    // register pending + apply overlay
-    set((s) => ({
-      ops: {
-        ...s.ops,
-        pendingById: {
-          ...s.ops.pendingById,
-          [opId]: {
-            id: opId,
-            kind: call.name,
-            status: "queued",
-            intent,
-            optimistic,
-            createdAtMs,
-          },
-        },
-        pendingOrder: [...s.ops.pendingOrder, opId],
-        overlay: mergeOverlay(s.ops.overlay, optimistic),
-      },
-    }));
-
-    if (!transport || typeof transport.syscall !== "function") {
-      set((s) => ({
-        ops: {
-          ...s.ops,
-          lastError: { opId, message: "No transport wired into RFX store", atMs: nowMs() },
-          pendingById: {
-            ...s.ops.pendingById,
-            [opId]: { ...s.ops.pendingById[opId], status: "failed", error: "no transport" },
-          },
-        },
-      }));
-      return;
+        if (to === "acked") out.acked.push(row);
+        else if (to === "timeout") out.timeout.push(row);
+        else if (to === "failed") out.failed.push(row);
+        else if (to === "superseded") out.superseded.push(row);
     }
 
-    try {
-      set((s) => ({
-        ops: {
-          ...s.ops,
-          pendingById: {
-            ...s.ops.pendingById,
-            [opId]: { ...s.ops.pendingById[opId], status: "sent", sentAtMs: nowMs() },
-          },
+    return out;
+}
+
+// ---------------------------
+// Overlay merge (unchanged)
+// ---------------------------
+function mergeOverlay(base, patch) {
+    if (!patch) return base;
+    return {
+        track: { ...(base.track || {}), ...(patch.track || {}) },
+        fx: { ...(base.fx || {}), ...(patch.fx || {}) },
+        fxOrderByTrackGuid: {
+            ...(base.fxOrderByTrackGuid || {}),
+            ...(patch.fxOrderByTrackGuid || {}),
         },
-      }));
-
-      await transport.syscall(call);
-      // Ack happens only on ingestSnapshot(seq advance) once you’re on real snapshots.
-      // With current MockTransport VM, there is no seq advance guarantee — that’s fine for now.
-    } catch (err) {
-      const msg = String(err?.message || err);
-      set((s) => ({
-        ops: {
-          ...s.ops,
-          lastError: { opId, message: msg, atMs: nowMs() },
-          pendingById: {
-            ...s.ops.pendingById,
-            [opId]: { ...s.ops.pendingById[opId], status: "failed", error: msg },
-          },
-        },
-      }));
-    }
-  },
-
-  // ------------------------------------------------------------
-  // Session helpers
-  // ------------------------------------------------------------
-  setActiveTrackGuid: (trackGuid) =>
-    set((s) => ({ session: { ...s.session, activeTrackGuid: trackGuid } })),
-
-  setSelectedFxGuid: (fxGuid) =>
-    set((s) => ({ session: { ...s.session, selectedFxGuid: fxGuid } })),
-}));
+    };
+}
 
 function coerceToTransportCall(intent) {
-  if (!intent) return null;
-
-  // already a transport call
-  if (intent.name) return intent;
-
-  // convert kind -> name
-  if (intent.kind) return { ...intent, name: intent.kind };
-
-  return null;
+    if (!intent) return null;
+    if (intent.name) return intent;
+    if (intent.kind) return { ...intent, name: intent.kind };
+    return null;
 }
 
-function mergeOverlay(base, patch) {
-  if (!patch) return base;
-  return {
-    track: { ...(base.track || {}), ...(patch.track || {}) },
-    fx: { ...(base.fx || {}), ...(patch.fx || {}) },
-    fxOrderByTrackGuid: {
-      ...(base.fxOrderByTrackGuid || {}),
-      ...(patch.fxOrderByTrackGuid || {}),
+export const useRfxStore = create((set, get) => ({
+    // ---------------------------
+    // Wiring: we will call transport.syscall(call)
+    // ---------------------------
+    transport: null,
+    setTransport: (transport) => set({ transport }),
+
+    // ---------------------------
+    // Snapshot meta
+    // ---------------------------
+    snapshot: {
+        seq: 0,
+        schema: "none",
+        ts: 0,
+        receivedAtMs: 0,
     },
-  };
-}
+
+    reaper: { version: "unknown", resourcePath: "" },
+    project: { name: "", path: "", templateVersion: "unknown" },
+    transportState: null,
+    selection: { selectedTrackIndex: -1 },
+
+    // ---------------------------
+    // Normalized entities
+    // ---------------------------
+    entities: {
+        tracksByGuid: {},
+        trackOrder: [],
+
+        fxByGuid: {},
+        fxOrderByTrackGuid: {},
+
+        routesById: {},
+        routeIdsByTrackGuid: {},
+    },
+
+    // Perf-ish / VM compatibility
+    perf: {
+        buses: null,
+        activeBusId: null,
+        busModesById: null,
+        metersById: null,
+    },
+
+    // ---------------------------
+    // RFX-owned session state
+    // ---------------------------
+    session: {
+        activeTrackGuid: null,
+        selectedTrackGuid: null,
+        selectedFxGuid: null,
+    },
+
+    // ---------------------------
+    // Pending operations + overlay
+    // ---------------------------
+    ops: {
+        pendingById: {},
+        pendingOrder: [],
+        overlay: {
+            track: {},
+            fx: {},
+            fxOrderByTrackGuid: {},
+        },
+        lastError: null,
+
+        // ✅ NEW: bounded timeline
+        eventLog: [],
+    },
+
+    // ============================================================
+    // Event log API
+    // ============================================================
+    logEvent: (kind, data) => {
+        const entry = {
+            t: nowMs(),
+            kind: String(kind || "event"),
+            data: data ?? null,
+        };
+        set((s) => ({
+            ops: { ...s.ops, eventLog: pushBounded(s.ops.eventLog, entry) },
+        }));
+    },
+
+    clearEventLog: () => {
+        set((s) => ({ ops: { ...s.ops, eventLog: [] } }));
+    },
+
+    // ============================================================
+    // Selectors (helpers)
+    // ============================================================
+    selectTrackEffective: (trackGuid) => {
+        const st = get();
+        const base = st.entities.tracksByGuid[trackGuid];
+        if (!base) return null;
+        const patch = st.ops.overlay.track[trackGuid];
+        return patch ? { ...base, ...patch } : base;
+    },
+
+    selectFxOrderEffective: (trackGuid) => {
+        const st = get();
+        return (
+            st.ops.overlay.fxOrderByTrackGuid[trackGuid] ||
+            st.entities.fxOrderByTrackGuid[trackGuid] ||
+            []
+        );
+    },
+
+    selectFxEffective: (fxGuid) => {
+        const st = get();
+        const base = st.entities.fxByGuid[fxGuid];
+        if (!base) return null;
+        const patch = st.ops.overlay.fx[fxGuid];
+        return patch ? { ...base, ...patch } : base;
+    },
+
+    // ============================================================
+    // Ingest snapshot (Transport -> Core)
+    // ============================================================
+    ingestSnapshot: (viewJsonOrVm) => {
+        const receivedAtMs = nowMs();
+        const norm = normalize(viewJsonOrVm);
+
+        // ✅ Gate logs: only log snapshot+reconcile when seq changes
+        const prevSeq = Number(get().snapshot?.seq || 0);
+        const nextSeq = Number(norm?.snapshot?.seq || 0);
+        const seqChanged = nextSeq !== prevSeq && nextSeq !== 0;
+
+        if (seqChanged) {
+            get().logEvent("snapshot:received", {
+                seq: norm?.snapshot?.seq,
+                schema: norm?.snapshot?.schema,
+                ts: norm?.snapshot?.ts,
+            });
+        }
+
+        const prev = get();
+        const prevPendingById = prev.ops.pendingById;
+        const prevPendingOrder = prev.ops.pendingOrder;
+
+        const { nextOps } = reconcilePending(prev, norm);
+
+        // selection -> guid
+        let selectedGuid = prev.session.selectedTrackGuid;
+        const idx = Number(norm?.selection?.selectedTrackIndex ?? -1);
+        if (idx >= 0) selectedGuid = norm.entities.trackOrder[idx] || null;
+        else selectedGuid = null;
+
+        // active track fallback logic
+        let activeGuid = prev.session.activeTrackGuid;
+
+        // If VM-style "active bus" exists, prefer it
+        const vmActive = norm?.perf?.activeBusId;
+        if (vmActive) activeGuid = vmActive;
+
+        if (activeGuid && !norm.entities.tracksByGuid[activeGuid]) activeGuid = null;
+        if (!activeGuid) activeGuid = selectedGuid || norm.entities.trackOrder[0] || null;
+
+        // summarize transitions (only useful when seq changes)
+        const transitions = summarizeTransitions(
+            prevPendingById,
+            nextOps.pendingById,
+            prevPendingOrder
+        );
+
+        set(() => ({
+            snapshot: {
+                seq: norm.snapshot.seq,
+                schema: norm.snapshot.schema,
+                ts: norm.snapshot.ts,
+                receivedAtMs,
+            },
+            reaper: norm.reaper,
+            project: norm.project,
+            transportState: norm.transportState,
+            selection: norm.selection,
+            entities: norm.entities,
+
+            perf: norm.perf
+                ? {
+                    buses: norm.perf.buses,
+                    activeBusId: norm.perf.activeBusId,
+                    busModesById: norm.perf.busModesById ?? norm.perf.routingModesById ?? null,
+                    metersById: norm.perf.metersById,
+                }
+                : prev.perf,
+
+            session: {
+                ...prev.session,
+                activeTrackGuid: activeGuid,
+                selectedTrackGuid: selectedGuid,
+            },
+
+            ops: {
+                ...nextOps,
+                // preserve eventLog already stored
+                eventLog: get().ops.eventLog,
+            },
+        }));
+
+        // ✅ Only log transitions when seq changed AND something transitioned
+        if (seqChanged) {
+            const changed =
+                transitions.acked.length +
+                transitions.timeout.length +
+                transitions.failed.length +
+                transitions.superseded.length;
+
+            if (changed > 0) {
+                get().logEvent("reconcile:transitions", {
+                    acked: transitions.acked,
+                    timeout: transitions.timeout,
+                    failed: transitions.failed,
+                    superseded: transitions.superseded,
+                    stillPending: transitions.stillPending,
+                });
+            }
+        }
+    },
+
+    // ============================================================
+    // Mutation pipeline entrypoint (UI -> Core)
+    // ============================================================
+    dispatchIntent: async (intent) => {
+        const transport = get().transport;
+
+        // ✅ log intent receipt
+        get().logEvent("intent:received", intent);
+
+        const call = coerceToTransportCall(intent);
+        if (!call || !call.name) return;
+
+        const opId = uid("op");
+        const createdAtMs = nowMs();
+
+        const optimistic = buildOptimistic(get(), intent);
+
+        // register pending + apply overlay
+        set((s) => ({
+            ops: {
+                ...s.ops,
+                pendingById: {
+                    ...s.ops.pendingById,
+                    [opId]: {
+                        id: opId,
+                        kind: call.name,
+                        status: "queued",
+                        intent,
+                        optimistic,
+                        createdAtMs,
+                    },
+                },
+                pendingOrder: [...s.ops.pendingOrder, opId],
+                overlay: mergeOverlay(s.ops.overlay, optimistic),
+            },
+        }));
+
+        // ✅ log optimistic application
+        get().logEvent("intent:optimistic_applied", {
+            opId,
+            kind: call.name,
+            optimistic: optimistic || null,
+        });
+
+        if (!transport || typeof transport.syscall !== "function") {
+            set((s) => ({
+                ops: {
+                    ...s.ops,
+                    lastError: { opId, message: "No transport wired into RFX store", atMs: nowMs() },
+                    pendingById: {
+                        ...s.ops.pendingById,
+                        [opId]: { ...s.ops.pendingById[opId], status: "failed", error: "no transport" },
+                    },
+                },
+            }));
+
+            get().logEvent("syscall:error", {
+                opId,
+                kind: call.name,
+                error: "no transport",
+            });
+            return;
+        }
+
+        try {
+            set((s) => ({
+                ops: {
+                    ...s.ops,
+                    pendingById: {
+                        ...s.ops.pendingById,
+                        [opId]: { ...s.ops.pendingById[opId], status: "sent", sentAtMs: nowMs() },
+                    },
+                },
+            }));
+
+            // ✅ log syscall sent
+            get().logEvent("syscall:sent", { opId, call });
+
+            await transport.syscall(call);
+            // ack happens only once snapshots come in and reconcilePending verifies fields
+        } catch (err) {
+            const msg = String(err?.message || err);
+
+            set((s) => ({
+                ops: {
+                    ...s.ops,
+                    lastError: { opId, message: msg, atMs: nowMs() },
+                    pendingById: {
+                        ...s.ops.pendingById,
+                        [opId]: { ...s.ops.pendingById[opId], status: "failed", error: msg },
+                    },
+                },
+            }));
+
+            get().logEvent("syscall:error", {
+                opId,
+                kind: call.name,
+                error: msg,
+            });
+        }
+    },
+
+    // ------------------------------------------------------------
+    // Session helpers
+    // ------------------------------------------------------------
+    setActiveTrackGuid: (trackGuid) =>
+        set((s) => ({ session: { ...s.session, activeTrackGuid: trackGuid } })),
+
+    setSelectedFxGuid: (fxGuid) =>
+        set((s) => ({ session: { ...s.session, selectedFxGuid: fxGuid } })),
+}));
