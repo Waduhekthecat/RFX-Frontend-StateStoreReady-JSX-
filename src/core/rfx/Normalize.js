@@ -3,14 +3,15 @@
  * normalize(view)
  *
  * Supports TWO input shapes:
- *  1) REAPER snapshot: { schema, seq, ts, reaper, project, selection, transport, tracks: [...] }
- *  2) Current MockTransport VM: { buses, activeBusId, busModes, meters }
+ *  1) REAPER snapshot: { schema, seq, ts, reaper, project, selection, transport, session, tracks: [...] }
+ *  2) Current MockTransport VM: { buses, activeBusId, routingModes, meters }
  *
- * Always returns a normalized structure:
+ * Always returns:
  * {
  *   snapshot, reaper, project, selection, transportState,
- *   entities: { tracksByGuid, trackOrder, fxByGuid, fxOrderByTrackGuid, routesById, routeIdsByTrackGuid },
- *   perf: { metersById, busModesById, activeBusId, buses }   // optional (present for VM shape)
+ *   session: { activeBusId },
+ *   entities: { ... },
+ *   perf: { ... } | null
  * }
  */
 export function normalize(view) {
@@ -38,7 +39,6 @@ export function normalize(view) {
 
         selected: guid === String(view.activeBusId || ""),
 
-        // REAPER-ish defaults (not meaningful in VM mode)
         recArm: false,
         recMon: 0,
         recMode: 0,
@@ -75,6 +75,12 @@ export function normalize(view) {
         selectedTrackIndex: trackOrder.indexOf(String(view.activeBusId || "")),
       },
       transportState: null,
+
+      // ✅ new: session block (mirrors what REAPER will write later)
+      session: {
+        activeBusId: String(view.activeBusId || ""),
+      },
+
       entities: {
         tracksByGuid,
         trackOrder,
@@ -86,7 +92,7 @@ export function normalize(view) {
       perf: {
         buses,
         activeBusId: String(view.activeBusId || ""),
-        busModesById: view.busModes || {},
+        routingModesById: view.routingModes || {},
         metersById: view.meters || {},
       },
     };
@@ -117,6 +123,11 @@ export function normalize(view) {
   };
 
   const transportState = view?.transport || null;
+
+  // ✅ new: session block from REAPER
+  const session = {
+    activeBusId: String(view?.session?.activeBusId || ""),
+  };
 
   const tracks = Array.isArray(view?.tracks) ? view.tracks : [];
 
@@ -215,6 +226,7 @@ export function normalize(view) {
     project,
     selection,
     transportState,
+    session, // ✅
     entities: {
       tracksByGuid,
       trackOrder,

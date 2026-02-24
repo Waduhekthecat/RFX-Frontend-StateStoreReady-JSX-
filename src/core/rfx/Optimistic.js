@@ -1,7 +1,7 @@
 // src/core/rfx/Optimistic.js
 /**
  * Optimistic overlay builder.
- * Accepts either { kind: "setVol", ... } OR { name: "setVol", ... }.
+ * Accepts either { kind: "X" } OR { name: "X" }.
  */
 export function buildOptimistic(state, intent) {
   const kind = intent?.kind || intent?.name;
@@ -65,7 +65,58 @@ export function buildOptimistic(state, intent) {
       return { fxOrderByTrackGuid: { [trackGuid]: next } };
     }
 
+    // ✅ NEW: setRoutingMode(busId, mode) arms lanes (A/B/C)
+    // This is how routing mode is “stored” in REAPER.
+    case "setRoutingMode": {
+      const { busId, mode } = intent || {};
+      if (!busId) return null;
+
+      const lanes = findLaneGuidsForBus(state, busId); // {A,B,C} -> guid or null
+      if (!lanes.A && !lanes.B && !lanes.C) return null; // probably mock VM mode
+
+      const want = normalizeMode(mode);
+
+      const armA = want === "linear" || want === "parallel" || want === "lcr";
+      const armB = want === "parallel" || want === "lcr";
+      const armC = want === "lcr";
+
+      const patch = {};
+      if (lanes.A) patch[lanes.A] = { recArm: !!armA };
+      if (lanes.B) patch[lanes.B] = { recArm: !!armB };
+      if (lanes.C) patch[lanes.C] = { recArm: !!armC };
+
+      return { track: patch };
+    }
+
+    // ✅ selectActiveBus has no optimistic overlay (it changes INPUT sends in REAPER)
+    case "selectActiveBus":
     default:
       return null;
   }
+}
+
+function normalizeMode(m) {
+  const x = String(m || "linear").toLowerCase();
+  if (x === "lcr") return "lcr";
+  if (x === "parallel") return "parallel";
+  return "linear";
+}
+
+function findLaneGuidsForBus(state, busId) {
+  const tracksByGuid = state?.entities?.tracksByGuid || {};
+  const wantA = `${busId}A`;
+  const wantB = `${busId}B`;
+  const wantC = `${busId}C`;
+
+  const out = { A: null, B: null, C: null };
+
+  for (const guid of Object.keys(tracksByGuid)) {
+    const tr = tracksByGuid[guid];
+    const name = String(tr?.name || "");
+    if (name === wantA) out.A = guid;
+    else if (name === wantB) out.B = guid;
+    else if (name === wantC) out.C = guid;
+  }
+
+  return out;
 }
