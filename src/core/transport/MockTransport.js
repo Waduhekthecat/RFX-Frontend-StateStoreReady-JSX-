@@ -19,7 +19,13 @@ export function createMockTransportContractDocs() {
   };
 }
 
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 export function createMockTransport() {
+  let seq = 0;
+
   let vm = {
     buses: [
       { id: "FX_1", label: "FX_1", busNum: 1 },
@@ -71,6 +77,16 @@ export function createMockTransport() {
   }
 
   return {
+    // ✅ NEW: placeholder boot handshake
+    async boot() {
+      // simulate “launch”
+      await sleep(600);
+      // simulate “await /rfx/ready”
+      await sleep(900);
+      seq += 1;
+      return { ok: true, seq };
+    },
+
     getSnapshot() {
       return vm;
     },

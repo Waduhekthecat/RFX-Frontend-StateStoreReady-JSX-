@@ -1,5 +1,3 @@
-// src/app/Shell.jsx
-import React from "react";
 import { Outlet } from "react-router-dom";
 
 export const RFX_W = 1280;

@@ -5,11 +5,7 @@ const TransportCtx = React.createContext(null);
 
 export function TransportProvider({ children }) {
   const transport = React.useMemo(() => createMockTransport(), []);
-  return (
-    <TransportCtx.Provider value={transport}>
-      {children}
-    </TransportCtx.Provider>
-  );
+  return <TransportCtx.Provider value={transport}>{children}</TransportCtx.Provider>;
 }
 
 export function useTransport() {
@@ -17,6 +13,3 @@ export function useTransport() {
   if (!t) throw new Error("useTransport must be used within TransportProvider");
   return t;
 }
-
-// Transport = the ONLY thing your UI talks to.
-// Later you’ll swap MockTransport -> ElectronTransport, UI stays unchanged.
