@@ -18,10 +18,9 @@ export function Shell({ nav }) {
         userSelect: "none",
       }}
     >
-      {/* NAV (fixed height) */}
+      {/* [NAV|: Fixed height */}
       <div style={{ height: NAV_H, overflow: "hidden" }}>{nav}</div>
-
-      {/* CONTENT (fixed remainder) */}
+      {/* Console|: !Overflow ] */}
       <div style={{ height: RFX_H - NAV_H, overflow: "hidden" }}>
         <Outlet />
       </div>

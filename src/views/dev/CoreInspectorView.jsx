@@ -11,6 +11,34 @@ function fmtTime(ms) {
   );
 }
 
+function fmtAge(ms) {
+  if (!ms) return "";
+  const s = Math.max(0, Math.round(ms / 100) / 10); // 0.1s precision
+  return `${s}s`;
+}
+
+function toneColor(status) {
+  if (status === "acked") return "rgba(120,255,160,0.9)";
+  if (status === "failed" || status === "timeout")
+    return "rgba(255,120,120,0.95)";
+  if (status === "superseded") return "rgba(255,210,120,0.95)";
+  return "rgba(200,200,255,0.9)";
+}
+
+function boolBadge(ok) {
+  if (ok === true) return "✅";
+  if (ok === false) return "❌";
+  return "…";
+}
+
+function fmtMeta(meta) {
+  if (!meta) return "";
+  const parts = [];
+  if (meta.seq != null) parts.push(`seq=${meta.seq}`);
+  if (meta.opId) parts.push(`opId=${meta.opId}`);
+  return parts.length ? parts.join(" • ") : "";
+}
+
 async function copyTextToClipboard(text) {
   // Prefer modern clipboard API
   if (navigator?.clipboard?.writeText) {
@@ -49,7 +77,7 @@ export function CoreInspectorView() {
     tracks: Object.keys(entities?.tracksByGuid || {}).length,
     fx: Object.keys(entities?.fxByGuid || {}).length,
     routes: Object.keys(entities?.routesById || {}).length,
-    pending: Object.is(pendingOps.length, -0) ? 0 : pendingOps.length,
+    pending: pendingOps.length,
   };
 
   // newest first for display
@@ -69,8 +97,8 @@ export function CoreInspectorView() {
         perf: perf
           ? {
               activeBusId: perf.activeBusId,
-              // include both keys; only one will exist
               busModesById: perf.busModesById ?? perf.routingModesById ?? null,
+              buses: perf.buses ?? null,
             }
           : null,
         events: ops?.eventLog || [], // keep chronological order in export (oldest->newest)
@@ -86,14 +114,25 @@ export function CoreInspectorView() {
 
   return (
     <div style={{ padding: 16, height: "100%", overflow: "auto" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          marginBottom: 10,
+        }}
+      >
         <div style={{ fontSize: 18, fontWeight: 700 }}>RFXCore Inspector</div>
         <div style={{ opacity: 0.6, fontSize: 12 }}>
           events={ops?.eventLog?.length || 0} / 300
         </div>
         <div style={{ flex: 1 }} />
 
-        <button onClick={onCopyLog} style={btnStyle} title="Copy event log JSON to clipboard">
+        <button
+          onClick={onCopyLog}
+          style={btnStyle}
+          title="Copy event log JSON to clipboard"
+        >
           {copied ? "Copied!" : "Copy log"}
         </button>
 
@@ -103,7 +142,13 @@ export function CoreInspectorView() {
       </div>
 
       {copyErr ? (
-        <div style={{ ...cardStyle, borderColor: "rgba(255,80,80,0.35)", marginBottom: 12 }}>
+        <div
+          style={{
+            ...cardStyle,
+            borderColor: "rgba(255,80,80,0.35)",
+            marginBottom: 12,
+          }}
+        >
           <div style={{ ...cardTitle, marginBottom: 4 }}>Copy failed</div>
           <div style={{ ...monoLine, opacity: 0.85 }}>{copyErr}</div>
         </div>
@@ -121,7 +166,9 @@ export function CoreInspectorView() {
         <section style={cardStyle}>
           <div style={cardTitle}>Session</div>
           <div style={monoLine}>activeTrackGuid={String(session?.activeTrackGuid)}</div>
-          <div style={monoLine}>selectedTrackGuid={String(session?.selectedTrackGuid)}</div>
+          <div style={monoLine}>
+            selectedTrackGuid={String(session?.selectedTrackGuid)}
+          </div>
           <div style={monoLine}>selectedFxGuid={String(session?.selectedFxGuid)}</div>
         </section>
 
@@ -140,8 +187,132 @@ export function CoreInspectorView() {
         </section>
       </div>
 
+      {/* =========================
+          Pending Ops (compact + raw)
+         ========================= */}
       <section style={{ ...cardStyle, marginTop: 12 }}>
-        <div style={cardTitle}>Pending Ops</div>
+        <div
+          style={{
+            ...cardTitle,
+            display: "flex",
+            justifyContent: "space-between",
+          }}
+        >
+          <span>Pending Ops</span>
+          <span style={{ opacity: 0.6, fontSize: 12 }}>
+            {pendingOps.length ? "newest at bottom (queue order)" : "none"}
+          </span>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {pendingOps.length === 0 ? (
+            <div style={{ ...monoLine, opacity: 0.6 }}>No pending ops.</div>
+          ) : (
+            pendingOps.map((op) => {
+              const createdAt = Number(op?.createdAtMs || 0);
+              const sentAt = Number(op?.sentAtMs || 0);
+              const ageMs = createdAt ? Date.now() - createdAt : 0;
+
+              const kind = String(
+                op?.kind || op?.intent?.name || op?.intent?.kind || "unknown"
+              );
+              const status = String(op?.status || "unknown");
+
+              const verify = op?.verify || null;
+              const vOk = verify?.ok;
+              const vReason = verify?.reason;
+              const vSeq = verify?.checkedSeq;
+
+              return (
+                <div
+                  key={op.id}
+                  style={{
+                    borderRadius: 10,
+                    border: "1px solid rgba(255,255,255,0.10)",
+                    background: "rgba(255,255,255,0.03)",
+                    padding: 10,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "baseline",
+                      gap: 10,
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div style={{ fontFamily: monoFont, fontSize: 12, fontWeight: 800 }}>
+                      {kind}
+                    </div>
+
+                    <div
+                      style={{
+                        fontFamily: monoFont,
+                        fontSize: 11,
+                        padding: "2px 6px",
+                        borderRadius: 999,
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        color: toneColor(status),
+                      }}
+                    >
+                      {status}
+                    </div>
+
+                    <div style={{ fontFamily: monoFont, fontSize: 12, opacity: 0.8 }}>
+                      opId={String(op.id)}
+                    </div>
+
+                    <div style={{ flex: 1 }} />
+
+                    <div style={{ fontFamily: monoFont, fontSize: 12, opacity: 0.75 }}>
+                      age={fmtAge(ageMs)}
+                    </div>
+
+                    {sentAt ? (
+                      <div style={{ fontFamily: monoFont, fontSize: 12, opacity: 0.75 }}>
+                        sent={fmtAge(Date.now() - sentAt)}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div style={{ marginTop: 6, ...monoLine, opacity: 0.95 }}>
+                    verify {boolBadge(vOk)}{" "}
+                    <span style={{ opacity: 0.85 }}>
+                      {vReason ? vReason : "(not checked yet)"}
+                    </span>
+                    {vSeq != null ? (
+                      <span style={{ opacity: 0.65 }}> • checkedSeq={vSeq}</span>
+                    ) : null}
+                    {op?.ackSeq != null ? (
+                      <span style={{ opacity: 0.65 }}> • ackSeq={op.ackSeq}</span>
+                    ) : null}
+                  </div>
+
+                  {op?.error ? (
+                    <div
+                      style={{
+                        marginTop: 6,
+                        ...monoLine,
+                        opacity: 0.9,
+                        color: "rgba(255,140,140,0.95)",
+                      }}
+                    >
+                      error={String(op.error)}
+                    </div>
+                  ) : null}
+
+                  {op?.intent ? (
+                    <div style={{ marginTop: 6, ...monoLine, opacity: 0.75 }}>
+                      intent={String(op.intent?.name || op.intent?.kind || kind)}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <div style={{ marginTop: 10, opacity: 0.7, fontSize: 12 }}>Raw JSON:</div>
         <pre style={preStyle}>{JSON.stringify(pendingOps, null, 2)}</pre>
       </section>
 
@@ -161,16 +332,26 @@ export function CoreInspectorView() {
         <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
           {eventsNewestFirst.map((e, i) => (
             <div key={i} style={eventCardStyle}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
                 <div style={{ fontFamily: monoFont, fontSize: 12, opacity: 0.85 }}>
                   {fmtTime(e.t)}
                 </div>
                 <div style={{ fontFamily: monoFont, fontSize: 12, fontWeight: 700 }}>
                   {e.kind}
                 </div>
+
+                {/* ✅ meta line (seq/opId correlation) */}
+                {e.meta ? (
+                  <div style={{ fontFamily: monoFont, fontSize: 12, opacity: 0.65 }}>
+                    {fmtMeta(e.meta)}
+                  </div>
+                ) : null}
               </div>
+
               {e.data != null ? (
-                <pre style={{ ...preStyle, marginTop: 8 }}>{JSON.stringify(e.data, null, 2)}</pre>
+                <pre style={{ ...preStyle, marginTop: 8 }}>
+                  {JSON.stringify(e.data, null, 2)}
+                </pre>
               ) : null}
             </div>
           ))}

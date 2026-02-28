@@ -1,7 +1,7 @@
 // src/views/perform/PerformView.jsx
 import React from "react";
 import { useTransport } from "../../core/transport/TransportProvider";
-import { useRfxStore } from "../../core/rfx/Store";
+import { useRfxActions } from "../../core/rfx/Util";
 import { KnobRow } from "../../app/components/knobs/KnobRow";
 import { Panel } from "../../app/components/ui/Panel";
 import { BusCardArea } from "./components/BusCardArea";
@@ -32,8 +32,8 @@ function normalizeMode(m) {
 export function PerformView() {
   const vm = useVM();
 
-  // ✅ Core mutation entrypoint
-  const dispatchIntent = useRfxStore((s) => s.dispatchIntent);
+  // ✅ Core mutation entrypoint (via your helper hook)
+  const { dispatchIntent } = useRfxActions();
 
   const activeId = vm.activeBusId || "NONE";
   const knobs = React.useMemo(() => knobsForContext(activeId), [activeId]);
@@ -47,9 +47,9 @@ export function PerformView() {
         <div className="flex-1 min-h-0">
           <BusCardArea
             vm={vm}
-            // ✅ routing mode now comes from VM (mock) instead of hardcoded helper
-            getRoutingMode={(busId) => normalizeMode(vm?.busModes?.[busId] || "linear")}
-            // ✅ was transport.syscall → now dispatchIntent
+            getRoutingMode={(busId) =>
+              normalizeMode(vm?.busModes?.[busId] || "linear")
+            }
             onSelectBus={(busId) =>
               dispatchIntent({ name: "selectActiveBus", busId })
             }

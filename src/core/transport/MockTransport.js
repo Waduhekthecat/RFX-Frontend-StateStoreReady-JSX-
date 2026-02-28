@@ -44,7 +44,9 @@ export function createMockTransportContractDocs() {
 
       meters: { FX_1: { l: 0.1, r: 0.1 } },
     },
-    Syscalls: ["selectActiveBus", "setStateMode", "syncView"],
+
+    // ✅ Step 2b: canonical is setRoutingMode, but we accept setStateMode alias
+    Syscalls: ["selectActiveBus", "setRoutingMode", "setStateMode", "syncView"],
   };
 }
 
@@ -95,23 +97,31 @@ export function createMockTransport() {
   const emit = () => subs.forEach((cb) => cb(vm));
 
   // Fake meter updates: animate ONLY active bus (does NOT bump seq)
-  window.setInterval(() => {
-    const id = vm.activeBusId;
-    if (!id) return;
+  if (typeof window !== "undefined" && typeof window.setInterval === "function") {
+    window.setInterval(() => {
+      const id = vm.activeBusId;
+      if (!id) return;
 
-    const prev = vm.meters[id] || { l: 0, r: 0 };
-    const next = {
-      l: clamp01(prev.l * 0.85 + Math.random() * 0.35),
-      r: clamp01(prev.r * 0.85 + Math.random() * 0.35),
-    };
+      const prev = vm.meters[id] || { l: 0, r: 0 };
+      const next = {
+        l: clamp01(prev.l * 0.85 + Math.random() * 0.35),
+        r: clamp01(prev.r * 0.85 + Math.random() * 0.35),
+      };
 
-    vm = { ...vm, meters: { ...vm.meters, [id]: next } };
-    emit();
-  }, 60);
+      vm = { ...vm, meters: { ...vm.meters, [id]: next } };
+      emit();
+    }, 60);
+  }
 
   function bumpSeq() {
     seq += 1;
     vm = { ...vm, seq, ts: nowSec() };
+  }
+
+  function canonicalizeCall(call) {
+    if (!call) return null;
+    const name = call.name === "setStateMode" ? "setRoutingMode" : call.name;
+    return { ...call, name };
   }
 
   return {
@@ -134,29 +144,31 @@ export function createMockTransport() {
     },
 
     async syscall(call) {
-      if (!call || !call.name) return;
+      const c = canonicalizeCall(call);
+      if (!c || !c.name) return;
 
-      if (call.name === "selectActiveBus") {
+      if (c.name === "selectActiveBus") {
         bumpSeq();
-        vm = { ...vm, activeBusId: call.busId };
+        vm = { ...vm, activeBusId: c.busId };
         emit();
         return;
       }
 
-      // supports your EditView routing selector
-      // Accepts { name:"setStateMode", busId } OR { stateId }
-      if (call.name === "setRoutingMode") {
-        const id = call.busId;
+      // ✅ Step 2b: supports both:
+      //  - { name:"setRoutingMode", busId, mode }
+      //  - { name:"setStateMode",  busId, mode }  (alias)
+      if (c.name === "setRoutingMode") {
+        const id = c.busId;
         if (!id) return;
 
         bumpSeq();
-        const mode = normalizeMode(call.mode);
+        const mode = normalizeMode(c.mode);
         vm = { ...vm, busModes: { ...vm.busModes, [id]: mode } };
         emit();
         return;
       }
 
-      if (call.name === "syncView") {
+      if (c.name === "syncView") {
         bumpSeq();
         emit();
         return;

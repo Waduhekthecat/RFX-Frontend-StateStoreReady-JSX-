@@ -1,8 +1,7 @@
-// src/views/edit/EditView.jsx
 import React from "react";
 import { useNavigate, Outlet, useLocation } from "react-router-dom";
 import { useTransport } from "../../core/transport/TransportProvider";
-import { useRfxStore } from "../../core/rfx/Store";
+import { useRfxActions, uid } from "../../core/rfx/Util";
 import { Panel, Inset } from "../../app/components/ui/Panel";
 import { Badge } from "../../app/components/ui/Badge";
 import { InstalledFxShell } from "./components/installedFxShell";
@@ -44,13 +43,6 @@ function nextValidLane(mode, preferred) {
   const lanes = availableLanes(mode);
   if (preferred && lanes.includes(preferred)) return preferred;
   return lanes[0] || "A";
-}
-
-// ---------------------------
-// Id helpers
-// ---------------------------
-function uid(prefix = "id") {
-  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
 }
 
 // ---------------------------
@@ -303,7 +295,7 @@ function TrackDetailCard({ trackId }) {
     e.dataTransfer.effectAllowed = "move";
     try {
       e.dataTransfer.setData("text/plain", fxId);
-    } catch {}
+    } catch { }
   }
   function onDragOver(e) {
     e.preventDefault();
@@ -405,8 +397,7 @@ export function EditView() {
   const vm = useVM();
 
   // ✅ Core mutation entrypoint
-  const dispatchIntent = useRfxStore((s) => s.dispatchIntent);
-
+  const { dispatchIntent } = useRfxActions();
   const activeBusId = vm.activeBusId || vm.buses?.[0]?.id || "FX_1";
   const bus =
     vm.buses?.find?.((b) => b.id === activeBusId) || {
