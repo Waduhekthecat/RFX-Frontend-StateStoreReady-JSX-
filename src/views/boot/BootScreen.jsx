@@ -1,6 +1,6 @@
 import React from "react";
 import rfxLogo from "../../assets/rfxLogo.png";
-import { WaveformLoader } from "./WaveformLoader";
+import { WaveformLoader } from "./components/WaveformLoader";
 import { styles, bootCss } from "./_styles";
 
 export function BootScreen({ mode = "logo", status, onRetry, onSkip }) {

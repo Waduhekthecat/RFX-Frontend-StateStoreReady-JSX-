@@ -1,3 +1,3 @@
-export { BootGate } from "./BootGate";
-export { BootScreen } from "./BootScreen";
-export { WaveformLoader } from "./WaveformLoader";
+export { BootGate } from "./components/BootGate";
+export { BootScreen } from "./components/BootScreen";
+export { WaveformLoader } from "./components/WaveformLoader";

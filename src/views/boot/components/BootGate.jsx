@@ -1,8 +1,8 @@
 import React from "react";
-import { BootScreen } from "./BootScreen";
-import { useTransport } from "../../core/transport/TransportProvider";
-import { RfxBridge } from "../../core/rfx/RfxBridge";
-import { useRfxActions } from "../../core/rfx/Util";
+import { BootScreen } from "../BootScreen";
+import { useTransport } from "../../../core/transport/TransportProvider";
+import { RfxBridge } from "../../../core/rfx/RfxBridge";
+import { useRfxActions } from "../../../core/rfx/Util";
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));

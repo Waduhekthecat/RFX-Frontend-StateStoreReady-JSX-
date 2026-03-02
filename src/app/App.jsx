@@ -1,7 +1,7 @@
 import React from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { TransportProvider } from "../core/transport/TransportProvider";
-import { BootGate } from "../views/boot/BootGate";
+import { BootGate } from "../views/boot/components/BootGate";
 import { Shell } from "./shell/Shell";
 import { Nav } from "./nav/_index";
 import { PerformView } from "../views/perform/PerformView";
