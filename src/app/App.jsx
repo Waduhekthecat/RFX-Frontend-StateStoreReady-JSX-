@@ -6,7 +6,7 @@ import { Shell } from "./shell/Shell";
 import { Nav } from "./nav/_index";
 import { PerformView } from "../views/perform/PerformView";
 import { EditView } from "../views/edit/EditView";
-import { PluginView } from "../views/edit/PluginView";
+import { PluginView } from "../views/edit/plugin/PluginView";
 import { RouteView } from "../views/route/RouteView";
 import { SystemView } from "../views/system/SystemView";
 import { CoreInspectorView } from "../views/dev/CoreInspectorView";
