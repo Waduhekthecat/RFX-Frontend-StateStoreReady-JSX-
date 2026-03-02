@@ -1,16 +1,13 @@
 import { InstalledFxCard } from "./InstalledFxCard";
+import { styles } from "../_styles";
 
 export function InstalledFxCardArea({ items, onPick }) {
   if (!items?.length) {
-    return (
-      <div className="text-[12px] text-white/35 px-1 py-2">
-        No plugins found.
-      </div>
-    );
+    return <div className={styles.InstalledFxEmpty}>No plugins found.</div>;
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className={styles.InstalledFxList}>
       {items.map((p) => (
         <InstalledFxCard
           key={p?.id || p?.raw || `${p?.name}-${Math.random()}`}

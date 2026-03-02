@@ -1,5 +1,6 @@
 import React from "react";
-import { Inset } from "../../../app/components/ui/Panel";
+import { Inset } from "../../../components/ui/Panel";
+import { styles } from "../_styles";
 
 function hashStr(s) {
   let h = 2166136261;
@@ -44,28 +45,21 @@ function Row({ fx, active }) {
   return (
     <div
       className={[
-        "flex items-center gap-2",
-        "px-2 py-1.5 rounded-lg",
-        active ? "bg-white/10 border border-white/10" : "bg-white/0",
+        styles.PluginRowBase,
+        active ? styles.PluginRowActive : styles.PluginRowIdle,
       ].join(" ")}
     >
-      <div className="w-5 text-[11px] opacity-60 tabular-nums">{fx.index}</div>
+      <div className={styles.PluginIndex}>{fx.index}</div>
 
       <div className="flex-1 min-w-0">
-        <div className="text-[12px] font-semibold leading-tight truncate">
-          {fx.name}
-        </div>
-        <div className="text-[11px] opacity-55 leading-tight truncate">
-          {fx.vendor}
-        </div>
+        <div className={styles.PluginName}>{fx.name}</div>
+        <div className={styles.PluginVendor}>{fx.vendor}</div>
       </div>
 
       <div
         className={[
           "text-[10px] px-2 py-0.5 rounded-full border",
-          fx.enabled
-            ? "bg-green-400/10 text-green-200 border-green-400/20"
-            : "bg-white/5 text-white/40 border-white/10",
+          fx.enabled ? styles.PluginStateOn : styles.PluginStateOff,
         ].join(" ")}
       >
         {fx.enabled ? "ON" : "OFF"}
@@ -81,17 +75,13 @@ export function PluginList({
   className = "",
 }) {
   return (
-    <Inset className={["h-full min-h-0 p-2", className].join(" ")}>
-      <div className="flex items-center justify-between px-1 pb-2">
-        <div className="text-[11px] font-semibold tracking-wide text-white/70">
-          {title}
-        </div>
-        <div className="text-[10px] text-white/35">
-          {plugins.length} plugins
-        </div>
+    <Inset className={[styles.PluginInset, className].filter(Boolean).join(" ")}>
+      <div className={styles.PluginHeader}>
+        <div className={styles.PluginTitle}>{title}</div>
+        <div className={styles.PluginCount}>{plugins.length} plugins</div>
       </div>
 
-      <div className="flex flex-col gap-1 min-h-0">
+      <div className={styles.PluginRows}>
         {plugins.map((fx, i) => (
           <Row key={fx.id} fx={fx} active={i === activeIndex} />
         ))}

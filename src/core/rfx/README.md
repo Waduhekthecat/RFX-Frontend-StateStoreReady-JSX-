@@ -286,3 +286,41 @@ Think of RFXCore as:
 
 Transport is the wire.  
 UI is the face.
+
+
+
+src/core/rfx/
+  _index.js                 // barrel exports (public API)
+  RfxBridge.jsx             // wires TransportProvider -> store ingest
+  Store.js                  // tiny: creates zustand store from slices
+
+  store/
+    createRfxStore.js       // assemble slices + actions
+    initialState.js         // optional: keeps state shape explicit
+
+  slices/
+    wiringSlice.js          // transport + setTransport
+    snapshotSlice.js        // snapshot meta + reaper/project/selection/transportState
+    entitiesSlice.js        // entities truth
+    metersSlice.js          // telemetry meters (fast path)
+    perfSlice.js            // VM compat mirror
+    sessionSlice.js         // RFX UI session state
+    opsSlice.js             // pending ops + overlay + error + eventLog
+
+  ingest/
+    ingestSnapshot.js       // normalize + reconcile + session mapping + logging
+    ingestMeters.js         // meters frame coercion + merge
+
+  actions/
+    dispatchIntent.js       // UI -> optimistic -> syscall -> pending state updates
+    sessionActions.js       // setActiveTrackGuid, setSelectedFxGuid
+
+  selectors/
+    effective.js            // selectTrackEffective / selectFxEffective / selectFxOrderEffective
+
+  utils/
+    ids.js                  // uid, nowMs
+    eventLog.js             // pushBounded
+    overlay.js              // mergeOverlay
+    coercions.js            // coerceToTransportCall, coerceMetersFrame, mergeMetersById
+    transitions.js          // summarizeTransitions

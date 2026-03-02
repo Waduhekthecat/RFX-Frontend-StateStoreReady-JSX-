@@ -1,6 +1,7 @@
 import React from "react";
 import { TouchPickerRow } from "./TouchPickerRow";
 import { PickerSheet } from "./PickerSheet";
+import { styles } from "../_styles";
 
 export function FilterModal({
   open,
@@ -45,7 +46,7 @@ export function FilterModal({
 
   return (
     <div
-      className="fixed inset-0 z-[999] flex items-center justify-center"
+      className={styles.FilterModalOverlay}
       role="dialog"
       aria-modal="true"
       aria-labelledby="rfx-filter-title"
@@ -53,67 +54,34 @@ export function FilterModal({
         if (!picker) onClose?.();
       }}
     >
-      <div className="absolute inset-0 bg-black/80" />
+      <div className={styles.FilterModalBackdrop} />
 
       <div
-        className={[
-          "relative",
-          "w-[min(1100px,96vw)]",
-          "h-[min(680px,88vh)]",
-          "rounded-3xl",
-          "border border-white/15",
-          "bg-[#0b0c0e]",
-          "shadow-[0_30px_90px_rgba(0,0,0,0.70)]",
-          "p-7",
-          "flex flex-col",
-        ].join(" ")}
+        className={styles.FilterModalCard}
         onMouseDown={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-start justify-between gap-6">
-          <div className="min-w-0">
-            <div
-              id="rfx-filter-title"
-              className="text-[24px] font-semibold tracking-wide text-white/92"
-            >
+        <div className={styles.FilterModalHeader}>
+          <div className={styles.FilterModalTitleWrap}>
+            <div id="rfx-filter-title" className={styles.FilterModalTitle}>
               Filter
             </div>
-            <div className="text-[14px] text-white/45 mt-2">
+            <div className={styles.FilterModalSubtitle}>
               Narrow the list without typing.
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className={styles.FilterModalHeaderButtons}>
             <button
               onClick={onClear}
-              className={[
-                "h-12",
-                "px-6",
-                "text-[15px]",
-                "rounded-2xl",
-                "border border-white/12",
-                "bg-white/6",
-                "text-white/85",
-                "hover:bg-white/10 transition",
-                "active:translate-y-[1px]",
-              ].join(" ")}
+              className={[styles.FilterModalBtnBase, styles.FilterModalBtnClear].join(" ")}
             >
               Clear
             </button>
 
             <button
               onClick={onClose}
-              className={[
-                "h-12",
-                "px-7",
-                "text-[15px]",
-                "rounded-2xl",
-                "border border-white/12",
-                "bg-white/12",
-                "text-white/92",
-                "hover:bg-white/16 transition",
-                "active:translate-y-[1px]",
-              ].join(" ")}
+              className={[styles.FilterModalBtnBase, styles.FilterModalBtnDone].join(" ")}
             >
               Done
             </button>
@@ -121,9 +89,9 @@ export function FilterModal({
         </div>
 
         {/* Body */}
-        <div className="mt-8 flex-1 min-h-0 flex flex-col">
-          <div className="flex-1 min-h-0 rounded-3xl border border-white/10 bg-white/3 p-6">
-            <div className="flex flex-col gap-6">
+        <div className={styles.FilterModalBody}>
+          <div className={styles.FilterModalBodyCard}>
+            <div className={styles.FilterModalRows}>
               <TouchPickerRow
                 label="Type"
                 valueLabel={typeLabel}
@@ -141,7 +109,7 @@ export function FilterModal({
               />
             </div>
 
-            <div className="mt-7 text-[13px] text-white/35">
+            <div className={styles.FilterModalTip}>
               Tip: filters are touch-friendly—no keyboard needed.
             </div>
           </div>

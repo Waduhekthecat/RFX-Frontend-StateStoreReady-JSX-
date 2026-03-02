@@ -1,5 +1,5 @@
-import { Panel, PanelHeader, PanelBody, Inset } from "../../../app/components/ui/Panel";
-import { Badge } from "../../../app/components/ui/Badge";
+import { Panel, PanelHeader, PanelBody, Inset } from "../../../components/ui/Panel";
+import { Badge } from "../../../components/ui/Badge";
 
 export function BusCardShell({ title = "FX_1", active = false }) {
   return (

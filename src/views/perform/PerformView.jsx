@@ -1,10 +1,10 @@
-// src/views/perform/PerformView.jsx
 import React from "react";
 import { useTransport } from "../../core/transport/TransportProvider";
 import { useRfxActions } from "../../core/rfx/Util";
-import { KnobRow } from "../../app/components/knobs/KnobRow";
-import { Panel } from "../../app/components/ui/Panel";
-import { BusCardArea } from "./components/BusCardArea";
+import { KnobRow } from "../../components/controls/knobs/KnobRow";
+import { Panel } from "../../components/ui/Panel";
+import { BusCardArea } from "./components/_index";
+import { styles, KNOB_STRIP_H } from "./_styles";
 
 function useVM() {
   const t = useTransport();
@@ -38,27 +38,21 @@ export function PerformView() {
   const activeId = vm.activeBusId || "NONE";
   const knobs = React.useMemo(() => knobsForContext(activeId), [activeId]);
 
-  const KNOB_STRIP_H = 185;
-
   return (
-    <div className="h-full w-full p-3 min-h-0">
-      <div className="h-full min-h-0 flex flex-col gap-3">
+    <div className={styles.Root}>
+      <div className={styles.Column}>
         {/* TOP: BUS GRID */}
-        <div className="flex-1 min-h-0">
+        <div className={styles.Top}>
           <BusCardArea
             vm={vm}
-            getRoutingMode={(busId) =>
-              normalizeMode(vm?.busModes?.[busId] || "linear")
-            }
-            onSelectBus={(busId) =>
-              dispatchIntent({ name: "selectActiveBus", busId })
-            }
+            getRoutingMode={(busId) => normalizeMode(vm?.busModes?.[busId] || "linear")}
+            onSelectBus={(busId) => dispatchIntent({ name: "selectActiveBus", busId })}
           />
         </div>
 
         {/* BOTTOM: KNOB STRIP */}
         <Panel
-          className="min-h-0"
+          className={styles.KnobPanel}
           style={{ height: KNOB_STRIP_H, flex: `0 0 ${KNOB_STRIP_H}px` }}
         >
           <KnobRow knobs={knobs} />

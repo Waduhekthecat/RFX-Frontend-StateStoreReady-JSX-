@@ -1,11 +1,6 @@
 import React from "react";
-import {
-  Panel,
-  PanelHeader,
-  PanelBody,
-  Inset,
-} from "../../../app/components/ui/Panel";
-import { Badge } from "../../../app/components/ui/Badge";
+import { Panel, PanelHeader, PanelBody, Inset } from "../../../components/ui/Panel";
+import { Badge } from "../../../components/ui/Badge";
 import SimpleBar from "simplebar-react";
 import "simplebar-react/dist/simplebar.min.css";
 
@@ -19,14 +14,14 @@ import {
   getPluginType,
   getPluginFormat,
 } from "./InstalledFxUtils";
+import { styles } from "../_styles";
 
 export function InstalledFxShell({ installedFx, onPick, className = "" }) {
   const fallback = useInstalledFxFromTransport();
   const normalized = normalizeInstalledFx(installedFx ?? fallback);
 
   // If transport has nothing yet → use mock data
-  const data =
-    normalized.plugins?.length > 0 ? normalized : makeMockInstalledFx(30);
+  const data = normalized.plugins?.length > 0 ? normalized : makeMockInstalledFx(30);
 
   const all = data.plugins ?? [];
 
@@ -102,35 +97,26 @@ export function InstalledFxShell({ installedFx, onPick, className = "" }) {
   }
 
   return (
-    <Panel className={["h-full min-h-0 flex flex-col", className].join(" ")}>
+    <Panel className={[styles.InstalledFxShellRoot, className].join(" ")}>
       <PanelHeader>
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="font-semibold tracking-wide text-white/85 truncate">
-            INSTALLED
-          </div>
+        <div className={styles.InstalledFxHeaderLeft}>
+          <div className={styles.InstalledFxHeaderTitle}>INSTALLED</div>
 
-          <Badge tone="neutral" className="text-[10px]">
+          <Badge tone="neutral" className={styles.InstalledFxHeaderBadge}>
             {filtered.length}/{all.length || data.count || 0}
           </Badge>
 
           {activeFilterCount > 0 ? (
-            <Badge tone="neutral" className="text-[10px]">
+            <Badge tone="neutral" className={styles.InstalledFxHeaderBadge}>
               {activeFilterCount} FILTER{activeFilterCount > 1 ? "S" : ""}
             </Badge>
           ) : null}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className={styles.InstalledFxHeaderRight}>
           <button
             onClick={() => setFilterOpen(true)}
-            className={[
-              "text-[11px]",
-              "rounded-lg border border-white/10 bg-black/30",
-              "px-3 py-1.5",
-              "text-white/70",
-              "hover:bg-white/6 transition",
-              "active:translate-y-[1px]",
-            ].join(" ")}
+            className={styles.InstalledFxFilterBtn}
           >
             Filter
           </button>
@@ -138,9 +124,9 @@ export function InstalledFxShell({ installedFx, onPick, className = "" }) {
       </PanelHeader>
 
       <PanelBody className="flex-1 min-h-0">
-        <Inset className="h-full min-h-0 p-3 flex flex-col gap-2">
-          <SimpleBar className="flex-1 min-h-0 rfxSimpleBar">
-            <div className="pr-2">
+        <Inset className={styles.InstalledFxInset}>
+          <SimpleBar className={styles.InstalledFxScroll}>
+            <div className={styles.InstalledFxScrollInner}>
               <InstalledFxCardArea items={filtered} onPick={onPick} />
             </div>
           </SimpleBar>

@@ -1,7 +1,7 @@
 // src/views/edit/PluginView.jsx
 import React from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Panel } from "../../app/components/ui/Panel";
+import { Panel } from "../../components/ui/Panel";
 
 export function PluginView() {
   const { trackId, fxId } = useParams();

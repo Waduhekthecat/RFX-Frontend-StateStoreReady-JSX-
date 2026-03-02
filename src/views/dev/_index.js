@@ -1,0 +1,1 @@
+export { CoreInspectorView } from "./CoreInspectorView";

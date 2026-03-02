@@ -1,5 +1,8 @@
+// src/components/controls/knobs/Knob.jsx
 import React from "react";
 import knobStripUrl from "../../../assets/knobSpriteStrip.png";
+import { styles, SPRITE_FRAMES, RENDER_SIZE, CENTER_FRAME } from "./_styles";
+
 // URL TO ADJUST KNOB STYLES: https://www.g200kg.com/en/webknobman/index.html?f=ABS.knob&n=2571
 
 function clamp01(n) {
@@ -9,10 +12,6 @@ function clamp01(n) {
   if (v > 1) return 1;
   return v;
 }
-
-const SPRITE_FRAMES = 200;
-const RENDER_SIZE = 140;
-const CENTER_FRAME = 96; // your “straight up” frame index in the strip
 
 function valueToFrame(v01, frames) {
   const v = clamp01(v01);
@@ -54,9 +53,7 @@ export function Knob({ label, value, mapped, mappedLabel, onChange }) {
   }, []);
 
   // Ensure drag lock is removed if component unmounts mid-drag
-  React.useEffect(() => {
-    return () => setGlobalDragLock(false);
-  }, []);
+  React.useEffect(() => () => setGlobalDragLock(false), []);
 
   const v = clamp01(value);
   const frameIndex = valueToFrame(v, SPRITE_FRAMES);
@@ -81,11 +78,9 @@ export function Knob({ label, value, mapped, mappedLabel, onChange }) {
   }
 
   function onPointerDown(e) {
-    // ✅ Prevent browser selection/dragging behavior
     e.preventDefault();
     e.stopPropagation();
 
-    // ✅ detect double click / double tap
     const now = Date.now();
     const delta = now - lastTapRef.current;
     lastTapRef.current = now;
@@ -98,7 +93,6 @@ export function Knob({ label, value, mapped, mappedLabel, onChange }) {
     const el = e.currentTarget;
     const pointerId = e.pointerId;
 
-    // capture so we keep getting events outside the element
     el.setPointerCapture?.(pointerId);
 
     setGlobalDragLock(true);
@@ -110,7 +104,6 @@ export function Knob({ label, value, mapped, mappedLabel, onChange }) {
   function onPointerMove(e) {
     if (!dragging || !startRef.current) return;
 
-    // while dragging, keep preventing default selection behaviors
     e.preventDefault();
     e.stopPropagation();
 
@@ -128,8 +121,8 @@ export function Knob({ label, value, mapped, mappedLabel, onChange }) {
   }
 
   function onLostPointerCapture(e) {
-    // If something steals capture, end safely
-    if (dragging) finishDrag(e.currentTarget, startRef.current?.pointerId ?? e.pointerId);
+    if (dragging)
+      finishDrag(e.currentTarget, startRef.current?.pointerId ?? e.pointerId);
   }
 
   // --- Sprite math (vertical strip) ---
@@ -148,15 +141,7 @@ export function Knob({ label, value, mapped, mappedLabel, onChange }) {
   const containerW = Math.max(120, RENDER_SIZE + 28);
 
   return (
-    <div
-      style={{
-        width: containerW,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 0,
-      }}
-    >
+    <div style={styles.knobWrap(containerW)}>
       {/* KNOB FACE */}
       <div
         onPointerDown={onPointerDown}
@@ -165,58 +150,22 @@ export function Knob({ label, value, mapped, mappedLabel, onChange }) {
         onPointerCancel={onPointerCancel}
         onLostPointerCapture={onLostPointerCapture}
         className="select-none"
-        style={{
-          width: RENDER_SIZE,
-          height: RENDER_SIZE,
-          borderRadius: 999,
-          overflow: "hidden",
-          position: "relative",
-          touchAction: "none",
-          cursor: "ns-resize",
-          background: "transparent",
-          border: "none",
-          filter: dragging
-            ? "drop-shadow(0px 8px 14px rgba(0,0,0,0.60))"
-            : "drop-shadow(0px 16px 26px rgba(0,0,0,0.85))",
-        }}
+        style={styles.knobFace(dragging)}
       >
         <img
           src={knobStripUrl}
           draggable={false}
           alt=""
-          style={{
-            position: "absolute",
-            left: "50%",
-            top: 0,
-            width: stripW,
-            height: stripH,
-            transform: `translateX(-50%) translateY(${y}px)`,
-            userSelect: "none",
-            WebkitUserSelect: "none",
-            pointerEvents: "none",
-          }}
+          style={styles.knobImg(stripW, stripH, y)}
         />
       </div>
 
       {/* LABELS */}
-      <div style={{ textAlign: "center", width: "100%", marginTop: -10 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, lineHeight: "12px" }}>
-          {label}
-        </div>
+      <div style={styles.labelWrap}>
+        <div style={styles.label}>{label}</div>
 
         {mapped && mappedLabel ? (
-          <div
-            style={{
-              marginTop: 2,
-              fontSize: 10,
-              opacity: 0.6,
-              lineHeight: "11px",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-            title={mappedLabel}
-          >
+          <div style={styles.mappedLabel} title={mappedLabel}>
             {mappedLabel}
           </div>
         ) : null}

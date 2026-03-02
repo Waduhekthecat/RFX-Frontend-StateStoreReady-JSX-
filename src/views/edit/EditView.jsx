@@ -2,9 +2,9 @@ import React from "react";
 import { useNavigate, Outlet, useLocation } from "react-router-dom";
 import { useTransport } from "../../core/transport/TransportProvider";
 import { useRfxActions, uid } from "../../core/rfx/Util";
-import { Panel, Inset } from "../../app/components/ui/Panel";
-import { Badge } from "../../app/components/ui/Badge";
-import { InstalledFxShell } from "./components/installedFxShell";
+import { Panel, Inset } from "../../components/ui/Panel";
+import { Badge } from "../../components/ui/Badge";
+import { InstalledFxShell } from "./components/InstalledFxShell";
 
 function useVM() {
   const t = useTransport();

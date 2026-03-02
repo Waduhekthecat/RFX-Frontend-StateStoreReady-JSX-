@@ -22,7 +22,6 @@ export function WaveformLoader({ progress01 = 0, height = 44 }) {
       canvas.width = Math.floor(cssW * dpr);
       canvas.height = Math.floor(cssH * dpr);
 
-      // draw in CSS pixels
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
 
@@ -42,7 +41,6 @@ export function WaveformLoader({ progress01 = 0, height = 44 }) {
 
       ctx.clearRect(0, 0, w, h);
 
-      // outer frame
       roundRect(ctx, 0.5, 0.5, w - 1, h - 1, 999);
       ctx.fillStyle = "rgba(255,255,255,0.03)";
       ctx.fill();
@@ -50,7 +48,6 @@ export function WaveformLoader({ progress01 = 0, height = 44 }) {
       ctx.lineWidth = 1;
       ctx.stroke();
 
-      // subtle “scan glow” around playhead
       const playX = Math.max(8, Math.min(w - 8, progress01 * w));
       const glow = ctx.createRadialGradient(playX, h / 2, 2, playX, h / 2, 28);
       glow.addColorStop(0, "rgba(255,255,255,0.18)");
@@ -58,7 +55,6 @@ export function WaveformLoader({ progress01 = 0, height = 44 }) {
       ctx.fillStyle = glow;
       ctx.fillRect(playX - 40, 0, 80, h);
 
-      // clip inside rounded rect
       ctx.save();
       roundRect(ctx, 1, 1, w - 2, h - 2, 999);
       ctx.clip();
@@ -66,7 +62,6 @@ export function WaveformLoader({ progress01 = 0, height = 44 }) {
       const time = t / 1000;
       const mid = h / 2;
 
-      // intensity grows subtly as progress increases
       const ampBase = 0.22 + 0.35 * progress01;
 
       const layers = [
@@ -97,7 +92,6 @@ export function WaveformLoader({ progress01 = 0, height = 44 }) {
         ctx.stroke();
       }
 
-      // playhead line
       ctx.beginPath();
       ctx.moveTo(playX, 6);
       ctx.lineTo(playX, h - 6);
@@ -105,7 +99,6 @@ export function WaveformLoader({ progress01 = 0, height = 44 }) {
       ctx.lineWidth = 1;
       ctx.stroke();
 
-      // tiny baseline
       ctx.beginPath();
       ctx.moveTo(0, mid);
       ctx.lineTo(w, mid);

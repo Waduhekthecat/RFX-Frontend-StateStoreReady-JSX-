@@ -1,6 +1,7 @@
 // src/core/transport/TransportProvider.jsx
 import React from "react";
 import { createMockTransport } from "./MockTransport";
+import { wrapTransportWithContract } from "./ContractEnforcer";
 
 const TransportCtx = React.createContext(null);
 
@@ -21,7 +22,11 @@ const TransportCtx = React.createContext(null);
  */
 export function TransportProvider({ children, transport: providedTransport = null }) {
   const transport = React.useMemo(() => {
-    return providedTransport || createMockTransport();
+    const raw = providedTransport || createMockTransport();
+    return wrapTransportWithContract(raw, {
+      name: raw?.constructor?.name || (providedTransport ? "ProvidedTransport" : "MockTransport"),
+      warn: true,
+    });
   }, [providedTransport]);
 
   return <TransportCtx.Provider value={transport}>{children}</TransportCtx.Provider>;

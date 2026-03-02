@@ -8,11 +8,29 @@ function isMockVm(norm) {
   return schema.startsWith("mock_vm");
 }
 
+// ---------------------------
+// Standardized reason strings
+// ---------------------------
+const REASONS = {
+  OK: "ok",
+  WAIT_SEQ: "waiting for seq advance",
+
+  MISSING_INPUT: "missing INPUT track",
+
+  // mismatch patterns
+  ACTIVE_BUS_MISMATCH: (want, got) => `active bus mismatch: want ${want} got ${got}`,
+  BUS_MODE_MISMATCH: (want, got) => `bus mode mismatch: want ${want} got ${got}`,
+
+  // generic
+  SUPERSEDED: "superseded by newer op (collapse)",
+  TIMEOUT: (ms) => `timeout after ${ms}ms`,
+};
+
 // tiny helper: always return consistent verify objects
 function v(ok, reason) {
   return {
     ok: !!ok,
-    reason: String(reason || (ok ? "ok" : "failed")),
+    reason: String(reason || (ok ? REASONS.OK : "failed")),
   };
 }
 
@@ -37,6 +55,9 @@ export function reconcilePending(prevState, norm) {
   const nextSeq = Number(norm?.snapshot?.seq || 0);
   const seqAdvanced = nextSeq > prevSeq;
 
+  // In general: checkedSeq is "the snapshot we're currently looking at"
+  const checkedSeq = nextSeq || prevSeq || 0;
+
   for (const opId of pendingOrder) {
     const op = nextPendingById[opId];
     if (!op) continue;
@@ -48,8 +69,8 @@ export function reconcilePending(prevState, norm) {
         status: "superseded",
         verify: {
           ok: false,
-          reason: "superseded by newer op (collapse)",
-          checkedSeq: nextSeq || prevSeq || 0,
+          reason: REASONS.SUPERSEDED,
+          checkedSeq,
         },
       };
       overlay = clearOverlayForOp(overlay, op);
@@ -70,8 +91,8 @@ export function reconcilePending(prevState, norm) {
           error: `Timed out after ${OP_TIMEOUT_MS}ms`,
           verify: {
             ok: false,
-            reason: `timeout after ${OP_TIMEOUT_MS}ms`,
-            checkedSeq: nextSeq || prevSeq || 0,
+            reason: REASONS.TIMEOUT(OP_TIMEOUT_MS),
+            checkedSeq,
           },
         };
         overlay = clearOverlayForOp(overlay, op);
@@ -79,21 +100,36 @@ export function reconcilePending(prevState, norm) {
       }
     }
 
-    // if snapshot hasn't advanced, don't re-check (avoid noisy verify churn)
-    if (!seqAdvanced && prevSeq !== 0) {
+    // ✅ Ensure verify is written on EVERY reconcile attempt for sent ops.
+    // If the seq hasn't advanced (and we already have a seq), we can't assert,
+    // but we still provide a consistent reason.
+    if (op.status === "sent" && !seqAdvanced && prevSeq !== 0) {
+      nextPendingById[opId] = {
+        ...op,
+        verify: {
+          ok: false,
+          reason: REASONS.WAIT_SEQ,
+          checkedSeq: prevSeq,
+        },
+      };
       nextPendingOrder.push(opId);
       continue;
     }
 
-    // ✅ verify with reasons
-    const checkedSeq = nextSeq || prevSeq || 0;
+    // For queued ops, we generally don't assert. Keep existing behavior.
+    if (op.status !== "sent") {
+      nextPendingOrder.push(opId);
+      continue;
+    }
+
+    // ✅ verify with reasons (seq advanced OR prevSeq==0 boot edge)
     const res = opVerifySnapshot(op, norm);
 
     nextPendingById[opId] = {
       ...op,
       verify: {
         ok: !!res.ok,
-        reason: res.reason || (res.ok ? "ok" : "unknown"),
+        reason: res.reason || (res.ok ? REASONS.OK : "unknown"),
         checkedSeq,
       },
     };
@@ -123,7 +159,7 @@ export function reconcilePending(prevState, norm) {
 
 /**
  * Returns { ok, reason } instead of boolean.
- * Reasons are intended for CoreInspector readability.
+ * Reasons are standardized for CoreInspector readability.
  */
 function opVerifySnapshot(op, norm) {
   const intent = op?.intent || {};
@@ -139,70 +175,78 @@ function opVerifySnapshot(op, norm) {
       const { trackGuid, value } = intent;
       if (!trackGuid) return v(false, "missing trackGuid");
       const tr = tracksByGuid[trackGuid];
-      if (!tr) return v(false, `track missing guid=${trackGuid}`);
+      if (!tr) return v(false, `track missing: ${trackGuid}`);
       const got = !!tr.recArm;
       const want = !!value;
-      return got === want ? v(true, "recArm matches") : v(false, `recArm=${got} expected=${want}`);
+      return got === want
+        ? v(true, REASONS.OK)
+        : v(false, `recArm mismatch: want ${want} got ${got}`);
     }
 
     case "toggleMute": {
       const { trackGuid, value } = intent;
       if (!trackGuid) return v(false, "missing trackGuid");
       const tr = tracksByGuid[trackGuid];
-      if (!tr) return v(false, `track missing guid=${trackGuid}`);
+      if (!tr) return v(false, `track missing: ${trackGuid}`);
       const got = !!tr.mute;
       const want = !!value;
-      return got === want ? v(true, "mute matches") : v(false, `mute=${got} expected=${want}`);
+      return got === want
+        ? v(true, REASONS.OK)
+        : v(false, `mute mismatch: want ${want} got ${got}`);
     }
 
     case "toggleSolo": {
       const { trackGuid, value } = intent;
       if (!trackGuid) return v(false, "missing trackGuid");
       const tr = tracksByGuid[trackGuid];
-      if (!tr) return v(false, `track missing guid=${trackGuid}`);
+      if (!tr) return v(false, `track missing: ${trackGuid}`);
       const got = Number(tr.solo || 0) !== 0;
       const want = !!value;
-      return got === want ? v(true, "solo matches") : v(false, `solo=${got} expected=${want}`);
+      return got === want
+        ? v(true, REASONS.OK)
+        : v(false, `solo mismatch: want ${want} got ${got}`);
     }
 
     case "setVol": {
       const { trackGuid, value } = intent;
       if (!trackGuid) return v(false, "missing trackGuid");
       const tr = tracksByGuid[trackGuid];
-      if (!tr) return v(false, `track missing guid=${trackGuid}`);
+      if (!tr) return v(false, `track missing: ${trackGuid}`);
       const got = Number(tr.vol);
       const want = Number(value);
       if (!Number.isFinite(got) || !Number.isFinite(want)) {
-        return v(false, `non-finite vol (got=${tr.vol} want=${value})`);
+        return v(false, `vol non-finite: want ${value} got ${tr.vol}`);
       }
       return nearlyEqual(got, want, EPS)
-        ? v(true, "vol matches")
-        : v(false, `vol=${got} expected≈${want}`);
+        ? v(true, REASONS.OK)
+        : v(false, `vol mismatch: want ≈${want} got ${got}`);
     }
 
     case "setPan": {
       const { trackGuid, value } = intent;
       if (!trackGuid) return v(false, "missing trackGuid");
       const tr = tracksByGuid[trackGuid];
-      if (!tr) return v(false, `track missing guid=${trackGuid}`);
+      if (!tr) return v(false, `track missing: ${trackGuid}`);
       const got = Number(tr.pan);
       const want = Number(value);
       if (!Number.isFinite(got) || !Number.isFinite(want)) {
-        return v(false, `non-finite pan (got=${tr.pan} want=${value})`);
+        return v(false, `pan non-finite: want ${value} got ${tr.pan}`);
       }
       return nearlyEqual(got, want, EPS)
-        ? v(true, "pan matches")
-        : v(false, `pan=${got} expected≈${want}`);
+        ? v(true, REASONS.OK)
+        : v(false, `pan mismatch: want ≈${want} got ${got}`);
     }
 
     case "toggleFx": {
       const { fxGuid, value } = intent;
       if (!fxGuid) return v(false, "missing fxGuid");
       const fx = fxByGuid[fxGuid];
-      if (!fx) return v(false, `fx missing guid=${fxGuid}`);
+      if (!fx) return v(false, `fx missing: ${fxGuid}`);
       const got = !!fx.enabled;
       const want = !!value;
-      return got === want ? v(true, "fx enabled matches") : v(false, `fx.enabled=${got} expected=${want}`);
+      return got === want
+        ? v(true, REASONS.OK)
+        : v(false, `fx enabled mismatch: want ${want} got ${got}`);
     }
 
     case "reorderFx": {
@@ -216,11 +260,11 @@ function opVerifySnapshot(op, norm) {
         fromIndex,
         toIndex
       );
-      if (!expected) return v(false, "could not compute expected order (bad indices or missing base)");
+      if (!expected) return v(false, "fx order: could not compute expected order");
 
       const actual = fxOrderByTrackGuid[trackGuid] || [];
       return arrayEqual(actual, expected)
-        ? v(true, "fx order matches")
+        ? v(true, REASONS.OK)
         : v(false, "fx order mismatch");
     }
 
@@ -232,14 +276,14 @@ function opVerifySnapshot(op, norm) {
 
       // MOCK VM verification: check perf busModesById
       if (isMockVm(norm)) {
-        const actual = normalizeMode(
+        const got = normalizeMode(
           norm?.perf?.busModesById?.[busId] ??
             norm?.perf?.routingModesById?.[busId] ??
             "linear"
         );
-        return actual === want
-          ? v(true, "mock: bus mode matches")
-          : v(false, `mock: mode=${actual} expected=${want} for busId=${busId}`);
+        return got === want
+          ? v(true, REASONS.OK)
+          : v(false, REASONS.BUS_MODE_MISMATCH(want, got));
       }
 
       // REAL REAPER verification: lane recArm state
@@ -249,30 +293,30 @@ function opVerifySnapshot(op, norm) {
       const wantB = want === "parallel" || want === "lcr";
       const wantC = want === "lcr";
 
-      // helpful “missing lane track” errors
       if (!lanes.A) return v(false, `missing lane track ${busId}A`);
-      // B/C may or may not exist physically; if they exist, they must match.
-      // If they don't exist but mode wants them, that's also a failure.
       if (wantB && !lanes.B) return v(false, `missing lane track ${busId}B for mode=${want}`);
       if (wantC && !lanes.C) return v(false, `missing lane track ${busId}C for mode=${want}`);
 
       if (lanes.A) {
         const trA = tracksByGuid[lanes.A];
-        if (!trA) return v(false, `lane A guid missing in snapshot (${busId}A)`);
-        if (!!trA.recArm !== !!wantA) return v(false, `${busId}A recArm=${!!trA.recArm} expected=${!!wantA}`);
+        if (!trA) return v(false, `lane A missing in snapshot (${busId}A)`);
+        if (!!trA.recArm !== !!wantA)
+          return v(false, `${busId}A recArm mismatch: want ${!!wantA} got ${!!trA.recArm}`);
       }
       if (lanes.B) {
         const trB = tracksByGuid[lanes.B];
-        if (!trB) return v(false, `lane B guid missing in snapshot (${busId}B)`);
-        if (!!trB.recArm !== !!wantB) return v(false, `${busId}B recArm=${!!trB.recArm} expected=${!!wantB}`);
+        if (!trB) return v(false, `lane B missing in snapshot (${busId}B)`);
+        if (!!trB.recArm !== !!wantB)
+          return v(false, `${busId}B recArm mismatch: want ${!!wantB} got ${!!trB.recArm}`);
       }
       if (lanes.C) {
         const trC = tracksByGuid[lanes.C];
-        if (!trC) return v(false, `lane C guid missing in snapshot (${busId}C)`);
-        if (!!trC.recArm !== !!wantC) return v(false, `${busId}C recArm=${!!trC.recArm} expected=${!!wantC}`);
+        if (!trC) return v(false, `lane C missing in snapshot (${busId}C)`);
+        if (!!trC.recArm !== !!wantC)
+          return v(false, `${busId}C recArm mismatch: want ${!!wantC} got ${!!trC.recArm}`);
       }
 
-      return v(true, "lane recArm matches routing mode");
+      return v(true, REASONS.OK);
     }
 
     // ✅ selectActiveBus verified by:
@@ -284,21 +328,21 @@ function opVerifySnapshot(op, norm) {
 
       // MOCK VM verification (no INPUT/routes)
       if (isMockVm(norm)) {
-        const active = String(norm?.session?.activeBusId || norm?.perf?.activeBusId || "");
-        return active === busId
-          ? v(true, "mock: active bus matches")
-          : v(false, `mock: activeBusId=${active} expected=${busId}`);
+        const got = String(norm?.session?.activeBusId || norm?.perf?.activeBusId || "");
+        return got === busId
+          ? v(true, REASONS.OK)
+          : v(false, REASONS.ACTIVE_BUS_MISMATCH(busId, got));
       }
 
-      const activeBusId = String(norm?.session?.activeBusId || "");
-      if (activeBusId !== busId) return v(false, `activeBusId=${activeBusId} expected=${busId}`);
+      const gotActive = String(norm?.session?.activeBusId || "");
+      if (gotActive !== busId) return v(false, REASONS.ACTIVE_BUS_MISMATCH(busId, gotActive));
 
       // REAL REAPER verification
       let inputGuid = null;
       try {
         inputGuid = mustFindInputTrackGuidByName(tracksByGuid);
-      } catch (e) {
-        return v(false, String(e?.message || e));
+      } catch {
+        return v(false, REASONS.MISSING_INPUT);
       }
 
       const armedLaneGuids = armedLaneGuidsForBus(tracksByGuid, busId);
@@ -306,8 +350,11 @@ function opVerifySnapshot(op, norm) {
 
       if (armedLaneGuids.length === 0) return v(false, "no armed lanes for selected bus");
       return setEqual(actualDestGuids, armedLaneGuids)
-        ? v(true, "INPUT sends match armed lanes")
-        : v(false, `INPUT sends mismatch (got=${actualDestGuids.length} want=${armedLaneGuids.length})`);
+        ? v(true, REASONS.OK)
+        : v(
+            false,
+            `INPUT sends mismatch: want ${armedLaneGuids.length} got ${actualDestGuids.length}`
+          );
     }
 
     case "syncView":
@@ -315,7 +362,6 @@ function opVerifySnapshot(op, norm) {
       return v(true, "syncView (no state assertion)");
 
     default:
-      // conservative: keep pending but explain why
       return v(false, `no verifier implemented for op kind="${kind}"`);
   }
 }
@@ -342,7 +388,13 @@ function collectInputSendDestGuids(routesById, inputGuid) {
   return out;
 }
 
-function expectedFxOrderFromIntentOrOptimistic(op, fxOrderByTrackGuid, trackGuid, fromIndex, toIndex) {
+function expectedFxOrderFromIntentOrOptimistic(
+  op,
+  fxOrderByTrackGuid,
+  trackGuid,
+  fromIndex,
+  toIndex
+) {
   const optimistic = op?.optimistic;
   const maybe = optimistic?.fxOrderByTrackGuid?.[trackGuid];
   if (Array.isArray(maybe)) return maybe;
@@ -447,7 +499,7 @@ function mustFindInputTrackGuidByName(tracksByGuid) {
     const tr = tracksByGuid[guid];
     if (String(tr?.name || "") === "INPUT") return guid;
   }
-  throw new Error('FATAL ERROR: INPUT track missing from rfx_view.json');
+  throw new Error(REASONS.MISSING_INPUT);
 }
 
 function findLaneGuidsForBusByName(tracksByGuid, busId) {

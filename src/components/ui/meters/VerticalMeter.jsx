@@ -1,49 +1,8 @@
 import React from "react";
-
-function clamp01(n) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return 0;
-  if (v < 0) return 0;
-  if (v > 1) return 1;
-  return v;
-}
+import { styles, cn, clamp01, themeForLevel } from "./_styles";
 
 function lerp(a, b, t) {
   return a + (b - a) * t;
-}
-
-function themeForLevel(level01) {
-  const YELLOW_AT = 0.78;
-  const RED_AT = 0.92;
-
-  if (level01 >= RED_AT) {
-    return {
-      fill:
-        "linear-gradient(180deg, rgba(255,120,120,0.92) 0%, rgba(255,60,60,0.96) 42%, rgba(200,18,18,0.98) 100%)",
-      peak: "rgba(255,110,110,0.95)",
-      glow: "rgba(255,80,80,0.35)",
-      cap: "rgba(255,190,190,0.40)",
-      clip: "rgba(255,70,70,0.95)",
-    };
-  }
-  if (level01 >= YELLOW_AT) {
-    return {
-      fill:
-        "linear-gradient(180deg, rgba(255,240,120,0.90) 0%, rgba(255,205,60,0.95) 50%, rgba(255,170,30,0.98) 100%)",
-      peak: "rgba(255,235,120,0.95)",
-      glow: "rgba(255,220,120,0.28)",
-      cap: "rgba(255,245,190,0.38)",
-      clip: "rgba(255,90,50,0.92)",
-    };
-  }
-  return {
-    fill:
-      "linear-gradient(180deg, rgba(130,255,170,0.90) 0%, rgba(80,220,120,0.94) 45%, rgba(35,170,85,0.98) 100%)",
-    peak: "rgba(120,255,170,0.95)",
-    glow: "rgba(80,220,120,0.22)",
-    cap: "rgba(190,255,215,0.35)",
-    clip: "rgba(255,70,70,0.95)",
-  };
 }
 
 export function VerticalMeter({
@@ -149,10 +108,10 @@ export function VerticalMeter({
 
   return (
     <div
-      className={[
-        "relative h-full overflow-hidden border border-white/10",
-        enabled ? "opacity-100" : "opacity-35",
-      ].join(" ")}
+      className={cn(
+        styles.wrapBase,
+        enabled ? styles.wrapEnabled : styles.wrapDisabled
+      )}
       style={{
         width,
         borderRadius: rounded,
@@ -162,7 +121,7 @@ export function VerticalMeter({
       {/* Glow overlay (purely visual) */}
       {enabled && (
         <div
-          className="absolute inset-0 pointer-events-none"
+          className={styles.glow}
           style={{
             borderRadius: rounded,
             boxShadow: `0 0 12px ${theme.glow}`,
@@ -172,7 +131,7 @@ export function VerticalMeter({
 
       {/* fill */}
       <div
-        className="absolute left-0 right-0 bottom-0"
+        className={styles.fill}
         style={{
           height: `${fillPct}%`,
           background: theme.fill,
@@ -183,7 +142,7 @@ export function VerticalMeter({
 
       {/* cap highlight */}
       <div
-        className="absolute left-0 right-0 pointer-events-none"
+        className={styles.cap}
         style={{
           bottom: `calc(${fillPct}% - 2px)`,
           height: 6,
@@ -194,7 +153,7 @@ export function VerticalMeter({
 
       {/* peak line */}
       <div
-        className="absolute left-0 right-0 pointer-events-none"
+        className={styles.peak}
         style={{
           bottom: `calc(${peakPct}% - 1px)`,
           height: 2,
@@ -205,7 +164,7 @@ export function VerticalMeter({
 
       {/* clip light */}
       <div
-        className="absolute top-1 left-1 right-1 h-3 rounded pointer-events-none"
+        className={styles.clip}
         style={{
           background: clip ? theme.clip : "rgba(255,255,255,0.10)",
           boxShadow: clip ? "0 0 14px rgba(255,70,70,0.65)" : "none",
