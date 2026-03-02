@@ -2,21 +2,15 @@ import React from "react";
 import { BootScreen } from "../BootScreen";
 import { useTransport } from "../../../core/transport/TransportProvider";
 import { RfxBridge } from "../../../core/rfx/RfxBridge";
-import { useRfxActions } from "../../../core/rfx/Util";
+import { useIntent } from "../../../core/useIntent";
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/**
- * Timing:
- * - Total min: 7s
- * - t=0..2s: logo-only (logo fades in)
- * - t=2..7s: full boot contents (progress anim is 5s)
- */
 export function BootGate({ children, allowSkip = true, autoStart = true }) {
   const transport = useTransport();
-  const { dispatchIntent } = useRfxActions();
+  const intent = useIntent();
 
   const [uiMode, setUiMode] = React.useState("logo"); // "logo" | "full"
   const [status, setStatus] = React.useState({
@@ -61,7 +55,7 @@ export function BootGate({ children, allowSkip = true, autoStart = true }) {
 
       setStatus({ phase: "syncing", message: "Syncing view snapshot…", detail: null, seq });
 
-      await dispatchIntent({ name: "syncView" });
+      await intent({ name: "syncView" });
 
       await totalMin;
 
@@ -77,7 +71,7 @@ export function BootGate({ children, allowSkip = true, autoStart = true }) {
         seq: null,
       });
     }
-  }, [transport, dispatchIntent]);
+  }, [transport, intent]);
 
   React.useEffect(() => {
     if (!autoStart) return;

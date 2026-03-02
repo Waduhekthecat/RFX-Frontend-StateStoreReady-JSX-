@@ -156,7 +156,11 @@ export function reconcilePending(prevState, norm) {
     },
   };
 }
-
+function canonLaneId(id) {
+  const s = String(id || "");
+  // FX_1_A -> FX_1A (also FX_12_B -> FX_12B)
+  return s.replace(/^([A-Za-z]+_\d+)_([ABC])$/, "$1$2");
+}
 /**
  * Returns { ok, reason } instead of boolean.
  * Reasons are standardized for CoreInspector readability.
@@ -237,6 +241,94 @@ function opVerifySnapshot(op, norm) {
         : v(false, `pan mismatch: want ≈${want} got ${got}`);
     }
 
+    // ---------------------------
+    // ✅ Buffered / RFX-named continuous controls
+    // Emitted by useIntentBuffered.
+    // For MOCK: verify against snapshot.trackMix / snapshot.busMix.
+    // ---------------------------
+
+    case "setTrackVolume": {
+      const { trackGuid, value } = intent;
+      if (!trackGuid) return v(false, "missing trackGuid");
+
+      // MOCK VM: check snapshot.trackMix[trackGuid].vol
+      if (isMockVm(norm)) {
+        const mix = norm?.snapshot?.trackMix || {};
+        const tg = canonLaneId(trackGuid);
+        const got = Number(mix[tg]?.vol);
+        const want = Number(value);
+        if (!Number.isFinite(got) || !Number.isFinite(want)) {
+          return v(false, `mock track vol non-finite: want ${value} got ${got}`);
+        }
+        return nearlyEqual(got, want, EPS)
+          ? v(true, REASONS.OK)
+          : v(false, `mock track vol mismatch: want ≈${want} got ${got}`);
+      }
+
+      // REAL VM fallback: if you normalize these into track entities later, this will work.
+      const tr = tracksByGuid[trackGuid];
+      if (!tr) return v(false, `track missing: ${trackGuid}`);
+      const got = Number(tr.vol);
+      const want = Number(value);
+      if (!Number.isFinite(got) || !Number.isFinite(want)) {
+        return v(false, `vol non-finite: want ${value} got ${tr.vol}`);
+      }
+      return nearlyEqual(got, want, EPS)
+        ? v(true, REASONS.OK)
+        : v(false, `vol mismatch: want ≈${want} got ${got}`);
+    }
+
+    case "setTrackPan": {
+      const { trackGuid, value } = intent;
+      if (!trackGuid) return v(false, "missing trackGuid");
+
+      // MOCK VM: check snapshot.trackMix[trackGuid].pan
+      if (isMockVm(norm)) {
+        const mix = norm?.snapshot?.trackMix || {};
+        const tg = canonLaneId(trackGuid);
+        const got = Number(mix[tg]?.pan);
+        const want = Number(value);
+        if (!Number.isFinite(got) || !Number.isFinite(want)) {
+          return v(false, `mock track pan non-finite: want ${value} got ${got}`);
+        }
+        return nearlyEqual(got, want, EPS)
+          ? v(true, REASONS.OK)
+          : v(false, `mock track pan mismatch: want ≈${want} got ${got}`);
+      }
+
+      // REAL VM fallback
+      const tr = tracksByGuid[trackGuid];
+      if (!tr) return v(false, `track missing: ${trackGuid}`);
+      const got = Number(tr.pan);
+      const want = Number(value);
+      if (!Number.isFinite(got) || !Number.isFinite(want)) {
+        return v(false, `pan non-finite: want ${value} got ${tr.pan}`);
+      }
+      return nearlyEqual(got, want, EPS)
+        ? v(true, REASONS.OK)
+        : v(false, `pan mismatch: want ≈${want} got ${got}`);
+    }
+
+    case "setBusVolume": {
+      const { busId, value } = intent;
+      if (!busId) return v(false, "missing busId");
+
+      // MOCK VM: check snapshot.busMix[busId].vol
+      if (isMockVm(norm)) {
+        const got = Number(norm?.snapshot?.busMix?.[busId]?.vol);
+        const want = Number(value);
+        if (!Number.isFinite(got) || !Number.isFinite(want)) {
+          return v(false, `mock bus vol non-finite: want ${value} got ${got}`);
+        }
+        return nearlyEqual(got, want, EPS)
+          ? v(true, REASONS.OK)
+          : v(false, `mock bus vol mismatch: want ≈${want} got ${got}`);
+      }
+
+      // REAL VM: you can wire later once bus mix exists in entities
+      return v(false, "setBusVolume verifier not wired for real VM yet");
+    }
+
     case "toggleFx": {
       const { fxGuid, value } = intent;
       if (!fxGuid) return v(false, "missing fxGuid");
@@ -278,8 +370,8 @@ function opVerifySnapshot(op, norm) {
       if (isMockVm(norm)) {
         const got = normalizeMode(
           norm?.perf?.busModesById?.[busId] ??
-            norm?.perf?.routingModesById?.[busId] ??
-            "linear"
+          norm?.perf?.routingModesById?.[busId] ??
+          "linear"
         );
         return got === want
           ? v(true, REASONS.OK)
@@ -352,9 +444,9 @@ function opVerifySnapshot(op, norm) {
       return setEqual(actualDestGuids, armedLaneGuids)
         ? v(true, REASONS.OK)
         : v(
-            false,
-            `INPUT sends mismatch: want ${armedLaneGuids.length} got ${actualDestGuids.length}`
-          );
+          false,
+          `INPUT sends mismatch: want ${armedLaneGuids.length} got ${actualDestGuids.length}`
+        );
     }
 
     case "syncView":
@@ -423,6 +515,7 @@ function computeCollapsedSet(pendingOrder, pendingById) {
   const collapsed = new Set();
   const lastVol = new Map();
   const lastPan = new Map();
+  const lastBusVol = new Map();
 
   for (const opId of pendingOrder) {
     const op = pendingById[opId];
@@ -431,6 +524,7 @@ function computeCollapsedSet(pendingOrder, pendingById) {
     const intent = op.intent || {};
     const kind = intent.kind || intent.name || op.kind;
 
+    // Existing (Reaper-ish)
     if (kind === "setVol") {
       const k = intent.trackGuid;
       if (!k) continue;
@@ -443,6 +537,28 @@ function computeCollapsedSet(pendingOrder, pendingById) {
       if (!k) continue;
       if (lastPan.has(k)) collapsed.add(lastPan.get(k));
       lastPan.set(k, opId);
+    }
+
+    // ✅ Buffered / RFX-named (your UI emits these)
+    if (kind === "setTrackVolume") {
+      const k = intent.trackGuid;
+      if (!k) continue;
+      if (lastVol.has(k)) collapsed.add(lastVol.get(k));
+      lastVol.set(k, opId);
+    }
+
+    if (kind === "setTrackPan") {
+      const k = intent.trackGuid;
+      if (!k) continue;
+      if (lastPan.has(k)) collapsed.add(lastPan.get(k));
+      lastPan.set(k, opId);
+    }
+
+    if (kind === "setBusVolume") {
+      const k = intent.busId;
+      if (!k) continue;
+      if (lastBusVol.has(k)) collapsed.add(lastBusVol.get(k));
+      lastBusVol.set(k, opId);
     }
   }
 

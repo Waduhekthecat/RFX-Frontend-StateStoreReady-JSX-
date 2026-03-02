@@ -1,6 +1,6 @@
 import React from "react";
 import { useRfxStore } from "../../core/rfx/Store";
-import { useRfxActions } from "../../core/rfx/Util";
+import { useIntent } from "../../core/useIntent";
 import { KnobRow } from "../../components/controls/knobs/KnobRow";
 import { Panel } from "../../components/ui/Panel";
 import { BusCardArea } from "./components/_index";
@@ -23,7 +23,7 @@ function normalizeMode(m) {
 }
 
 export function PerformView() {
-  const { dispatchIntent } = useRfxActions();
+  const intent = useIntent();
 
   // Pull normalized bus/perf state from the store
   const buses = useRfxStore((s) => s.perf?.buses || []);
@@ -57,7 +57,7 @@ export function PerformView() {
               normalizeMode(vm?.busModes?.[busId] || "linear")
             }
             onSelectBus={(busId) =>
-              dispatchIntent({ name: "selectActiveBus", busId })
+              intent({ name: "selectActiveBus", busId })
             }
           />
         </div>

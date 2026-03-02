@@ -62,6 +62,10 @@ export function normalize(view) {
         seq: asNum(v.seq, 0),
         schema: asStr(v.schema, "mock_vm"),
         ts: asNum(v.ts, 0),
+
+        // ✅ QUICK PASS-THROUGH FOR MOCK MIX STATE
+        trackMix: (v.trackMix && typeof v.trackMix === "object") ? v.trackMix : {},
+        busMix: (v.busMix && typeof v.busMix === "object") ? v.busMix : {},
       },
 
       // These are placeholders until REAPER backend provides real values

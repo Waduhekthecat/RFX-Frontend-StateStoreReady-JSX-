@@ -20,15 +20,21 @@ export function createElectronTransport() {
   const meterSubs = new Set();
 
   // Main -> renderer: truth snapshots
-  const offVm = api.onViewModel((next) => {
-    vm = next;
-    subs.forEach((cb) => cb(vm));
-  });
+  const offVm =
+    typeof api.onViewModel === "function"
+      ? api.onViewModel((next) => {
+        vm = next;
+        subs.forEach((cb) => cb(vm));
+      })
+      : null;
 
   // Main -> renderer: meter frames (no seq)
-  const offMeters = api.onMeters((frame) => {
-    meterSubs.forEach((cb) => cb(frame));
-  });
+  const offMeters =
+    typeof api.onMeters === "function"
+      ? api.onMeters((frame) => {
+        meterSubs.forEach((cb) => cb(frame));
+      })
+      : null;
 
   const transport = {
     async boot() {
@@ -75,7 +81,7 @@ export function createElectronTransport() {
       try {
         offVm?.();
         offMeters?.();
-      } catch {}
+      } catch { }
       subs.clear();
       meterSubs.clear();
     },

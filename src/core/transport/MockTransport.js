@@ -1,7 +1,22 @@
+// src/core/transport/MockTransport.js
+// Mock transport with canonical syscall contract + meters telemetry channel.
+// ✅ Includes: selectActiveBus, setRoutingMode (alias setStateMode),
+//    setBusVolume, setTrackVolume, setTrackPan,
+//    toggleFx, reorderFx, syncView
+// ✅ Meters are telemetry-only (no seq bump)
+
 function clamp01(n) {
   const v = Number(n);
   if (!Number.isFinite(v)) return 0;
   if (v < 0) return 0;
+  if (v > 1) return 1;
+  return v;
+}
+
+function clampPan(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return 0;
+  if (v < -1) return -1;
   if (v > 1) return 1;
   return v;
 }
@@ -21,6 +36,16 @@ function normalizeMode(m) {
   return "linear";
 }
 
+function normBusId(x) {
+  const s = String(x || "");
+  return s;
+}
+
+function normTrackId(x) {
+  const s = String(x || "");
+  return s;
+}
+
 export function createMockTransportContractDocs() {
   return {
     ViewModel: {
@@ -30,21 +55,40 @@ export function createMockTransportContractDocs() {
       ts: 1234567890,
       capabilities: {
         routingModes: ["linear", "parallel", "lcr"],
-        // Optional: let UI know some busses might not support B/C
-        // laneSupportByBusId: { FX_1: ["A","B","C"], FX_2: ["A","B"], ... }
       },
 
       buses: [{ id: "FX_1", label: "FX_1", busNum: 1 }],
       activeBusId: "FX_1",
 
-      // ✅ routing modes by bus id
+      // routing modes by bus id
       busModes: { FX_1: "linear" },
 
+      // ✅ bus mix
+      busMix: { FX_1: { vol: 0.8 } },
+
+      // ✅ track list + mix
+      tracks: [{ id: "FX_1A", label: "FX_1A", busId: "FX_1", lane: "A" }],
+      trackMix: { FX_1A: { vol: 0.8, pan: 0 } },
+
       meters: { FX_1: { l: 0.1, r: 0.1 } },
+
+      // FX mock fields (optional, for debug)
+      fxEnabledByGuid: {},
+      fxReorderLastByTrackGuid: {},
     },
 
-    // ✅ Step 2b: canonical is setRoutingMode, but we accept setStateMode alias
-    Syscalls: ["selectActiveBus", "setRoutingMode", "setStateMode", "syncView"],
+    // ✅ Canonical syscalls (plus alias)
+    Syscalls: [
+      "selectActiveBus",
+      "setRoutingMode",
+      "setStateMode", // alias of setRoutingMode
+      "setBusVolume",
+      "setTrackVolume",
+      "setTrackPan",
+      "syncView",
+      "toggleFx",
+      "reorderFx",
+    ],
 
     // ✅ Optional telemetry channel (fast path)
     Telemetry: ["subscribeMeters"],
@@ -85,12 +129,50 @@ export function createMockTransport() {
     ],
     activeBusId: "FX_1",
 
-    // ✅ routing mode per bus
+    // routing mode per bus
     busModes: {
       FX_1: "linear",
       FX_2: "parallel",
       FX_3: "lcr",
       FX_4: "parallel",
+    },
+
+    // ✅ bus mix (0..1)
+    busMix: {
+      FX_1: { vol: 0.85 },
+      FX_2: { vol: 0.75 },
+      FX_3: { vol: 0.8 },
+      FX_4: { vol: 0.78 },
+    },
+
+    // ✅ tracks (simple: lane tracks per bus; UI can ignore if not used yet)
+    tracks: [
+      { id: "FX_1A", label: "FX_1A", busId: "FX_1", lane: "A" },
+
+      { id: "FX_2A", label: "FX_2A", busId: "FX_2", lane: "A" },
+      { id: "FX_2B", label: "FX_2B", busId: "FX_2", lane: "B" },
+
+      { id: "FX_3A", label: "FX_3A", busId: "FX_3", lane: "A" },
+      { id: "FX_3B", label: "FX_3B", busId: "FX_3", lane: "B" },
+      { id: "FX_3C", label: "FX_3C", busId: "FX_3", lane: "C" },
+
+      { id: "FX_4A", label: "FX_4A", busId: "FX_4", lane: "A" },
+      { id: "FX_4B", label: "FX_4B", busId: "FX_4", lane: "B" },
+    ],
+
+    // ✅ track mix (vol 0..1, pan -1..1)
+    trackMix: {
+      FX_1A: { vol: 0.85, pan: 0 },
+
+      FX_2A: { vol: 0.75, pan: -0.2 },
+      FX_2B: { vol: 0.75, pan: 0.2 },
+
+      FX_3A: { vol: 0.8, pan: -0.4 },
+      FX_3B: { vol: 0.8, pan: 0 },
+      FX_3C: { vol: 0.8, pan: 0.4 },
+
+      FX_4A: { vol: 0.78, pan: -0.25 },
+      FX_4B: { vol: 0.78, pan: 0.25 },
     },
 
     meters: {
@@ -99,6 +181,10 @@ export function createMockTransport() {
       FX_3: { l: 0.0, r: 0.0 },
       FX_4: { l: 0.05, r: 0.04 },
     },
+
+    // FX syscall demo state (minimal)
+    fxEnabledByGuid: {},
+    fxReorderLastByTrackGuid: {},
   };
 
   // Truth subscribers (snapshots)
@@ -135,7 +221,6 @@ export function createMockTransport() {
     emitMeters({
       t: Date.now(),
       activeBusId: id,
-      // Support both naming conventions downstream
       metersByBusId: { [id]: m },
       metersById: { [id]: m },
     });
@@ -152,7 +237,6 @@ export function createMockTransport() {
     };
 
     // IMPORTANT: meters do NOT bump seq
-    // ALSO IMPORTANT: do NOT emit() truth snapshots anymore (prevents churn)
     vm = { ...vm, meters: { ...vm.meters, [id]: next } };
 
     // Telemetry-only push
@@ -175,7 +259,7 @@ export function createMockTransport() {
     }, 60);
   }
 
-  // start immediately (as before)
+  // start immediately
   startMeters();
 
   return {
@@ -187,7 +271,6 @@ export function createMockTransport() {
       await sleep(900);
       bumpSeq();
       emit();
-      // seed telemetry once after boot so UI draws instantly
       seedMetersForActiveBus();
       return { ok: true, seq };
     },
@@ -228,20 +311,23 @@ export function createMockTransport() {
       const c = canonicalizeCall(call);
       if (!c || !c.name) return { ok: false, error: "invalid syscall" };
 
+      // ---------------------------
+      // Active bus
+      // ---------------------------
       if (c.name === "selectActiveBus") {
+        const id = normBusId(c.busId);
         bumpSeq();
-        vm = { ...vm, activeBusId: c.busId };
+        vm = { ...vm, activeBusId: id };
         emit();
-        // seed telemetry immediately for the new active bus
         seedMetersForActiveBus();
         return { ok: true };
       }
 
-      // ✅ Step 2b: supports both:
-      //  - { name:"setRoutingMode", busId, mode }
-      //  - { name:"setStateMode",  busId, mode }  (alias)
+      // ---------------------------
+      // Routing mode (alias supported)
+      // ---------------------------
       if (c.name === "setRoutingMode") {
-        const id = c.busId;
+        const id = normBusId(c.busId);
         if (!id) return { ok: false, error: "missing busId" };
 
         bumpSeq();
@@ -251,6 +337,119 @@ export function createMockTransport() {
         return { ok: true };
       }
 
+      // ---------------------------
+      // ✅ Bus mix
+      // supports:
+      //  - { name:"setBusVolume", busId, value }  (preferred)
+      //  - { name:"setBusVolume", busId, vol }    (compat)
+      // ---------------------------
+      if (c.name === "setBusVolume") {
+        const id = normBusId(c.busId);
+        if (!id) return { ok: false, error: "missing busId" };
+
+        const v = clamp01(c.value ?? c.vol);
+        bumpSeq();
+        vm = {
+          ...vm,
+          busMix: {
+            ...(vm.busMix || {}),
+            [id]: { ...(vm.busMix?.[id] || {}), vol: v },
+          },
+        };
+        emit();
+        return { ok: true };
+      }
+
+      // ---------------------------
+      // ✅ Track mix
+      // supports:
+      //  - { name:"setTrackVolume", trackId, value } (preferred)
+      //  - { name:"setTrackVolume", trackGuid, value } (compat)
+      //  - { name:"setTrackPan",    trackId, value } (preferred; -1..1)
+      //  - { name:"setTrackPan",    trackGuid, pan } (compat)
+      // ---------------------------
+      if (c.name === "setTrackVolume") {
+        const id = normTrackId(c.trackId ?? c.trackGuid);
+        if (!id) return { ok: false, error: "missing trackId" };
+
+        const v = clamp01(c.value ?? c.vol);
+        bumpSeq();
+        vm = {
+          ...vm,
+          trackMix: {
+            ...(vm.trackMix || {}),
+            [id]: { ...(vm.trackMix?.[id] || {}), vol: v },
+          },
+        };
+        emit();
+        return { ok: true };
+      }
+
+      if (c.name === "setTrackPan") {
+        const id = normTrackId(c.trackId ?? c.trackGuid);
+        if (!id) return { ok: false, error: "missing trackId" };
+
+        const p = clampPan(c.value ?? c.pan);
+        bumpSeq();
+        vm = {
+          ...vm,
+          trackMix: {
+            ...(vm.trackMix || {}),
+            [id]: { ...(vm.trackMix?.[id] || {}), pan: p },
+          },
+        };
+        emit();
+        return { ok: true };
+      }
+
+      // ---------------------------
+      // FX: toggle enable/disable (minimal mock support)
+      // ---------------------------
+      if (c.name === "toggleFx") {
+        const fxGuid = String(c.fxGuid || "");
+        const value = !!c.value;
+        if (!fxGuid) return { ok: false, error: "missing fxGuid" };
+
+        bumpSeq();
+        vm = {
+          ...vm,
+          fxEnabledByGuid: {
+            ...(vm.fxEnabledByGuid || {}),
+            [fxGuid]: value,
+          },
+        };
+        emit();
+        return { ok: true };
+      }
+
+      // ---------------------------
+      // FX: reorder request (minimal mock support)
+      // ---------------------------
+      if (c.name === "reorderFx") {
+        const trackGuid = String(c.trackGuid || "");
+        const fromIndex = Number(c.fromIndex);
+        const toIndex = Number(c.toIndex);
+
+        if (!trackGuid) return { ok: false, error: "missing trackGuid" };
+        if (!Number.isFinite(fromIndex) || !Number.isFinite(toIndex)) {
+          return { ok: false, error: "missing fromIndex/toIndex" };
+        }
+
+        bumpSeq();
+        vm = {
+          ...vm,
+          fxReorderLastByTrackGuid: {
+            ...(vm.fxReorderLastByTrackGuid || {}),
+            [trackGuid]: { fromIndex, toIndex, at: Date.now() },
+          },
+        };
+        emit();
+        return { ok: true };
+      }
+
+      // ---------------------------
+      // View sync
+      // ---------------------------
       if (c.name === "syncView") {
         bumpSeq();
         emit();

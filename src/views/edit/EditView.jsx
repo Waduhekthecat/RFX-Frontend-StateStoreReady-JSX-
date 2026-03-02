@@ -1,11 +1,16 @@
 import React from "react";
 import { useNavigate, Outlet, useLocation } from "react-router-dom";
 import { useTransport } from "../../core/transport/TransportProvider";
-import { useRfxActions, uid } from "../../core/rfx/Util";
+import { uid } from "../../core/rfx/Util";
+import { useIntent } from "../../core/useIntent";
 import { Panel, Inset } from "../../components/ui/Panel";
 import { Badge } from "../../components/ui/Badge";
 import { InstalledFxShell } from "./components/InstalledFxShell";
+import { BusMixControls, TrackMixControls } from "./components/mixControls/_index";
 
+// ---------------------------
+// VM hook (transport snapshot)
+// ---------------------------
 function useVM() {
   const t = useTransport();
   const [vm, setVm] = React.useState(() => t.getSnapshot());
@@ -86,9 +91,8 @@ function ModeSelector({ mode, onChange }) {
 }
 
 /**
- * TrackSelector (was LaneSelector)
- * - Label says TRACK
- * - Shows only valid tracks for the current routing mode
+ * TrackSelector
+ * - Shows only valid tracks for current routing mode
  */
 function TrackSelector({ busId, mode, lane, onChange }) {
   const lanes = availableLanes(mode);
@@ -221,29 +225,30 @@ function PluginCard({
 
 /**
  * TrackDetailCard
- * (still local-only for now — we’ll wire these into dispatch later)
+ * - Still local-only chain for now
+ * - BUT: toggle/reorder are now wired to intents (so pipeline is exercised)
  */
-function TrackDetailCard({ trackId }) {
+function TrackDetailCard({ trackGuid, intent }) {
   const nav = useNavigate();
 
   const [chainsByTrack, setChainsByTrack] = React.useState(() => ({}));
-  const chain = chainsByTrack[trackId] || [];
+  const chain = chainsByTrack[trackGuid] || [];
   const dragSrcIdRef = React.useRef(null);
 
   React.useEffect(() => {
     setChainsByTrack((prev) => {
-      if (prev[trackId]) return prev;
-      return { ...prev, [trackId]: [] };
+      if (prev[trackGuid]) return prev;
+      return { ...prev, [trackGuid]: [] };
     });
-  }, [trackId]);
+  }, [trackGuid]);
 
   function setChain(next) {
-    setChainsByTrack((prev) => ({ ...prev, [trackId]: next }));
+    setChainsByTrack((prev) => ({ ...prev, [trackGuid]: next }));
   }
 
   function addFromInstalled(picked) {
     setChainsByTrack((prev) => {
-      const cur = prev[trackId] || [];
+      const cur = prev[trackGuid] || [];
       if (cur.length >= PLUGIN_MAX) return prev;
 
       const nextFx = {
@@ -256,24 +261,34 @@ function TrackDetailCard({ trackId }) {
       };
 
       const next = [...cur, nextFx];
-      return { ...prev, [trackId]: next };
+      return { ...prev, [trackGuid]: next };
     });
 
-    console.log("add fx", { trackId, picked });
+    // later: addFx syscall (when backend owns truth)
+    console.log("add fx", { trackGuid, picked });
   }
 
   function toggleFx(fxId) {
-    setChain(chain.map((fx) => (fx.id === fxId ? { ...fx, enabled: !fx.enabled } : fx)));
-    console.log("toggle fx", { trackId, fxId });
+    const fx = chain.find((x) => x.id === fxId);
+    const nextEnabled = fx ? !fx.enabled : true;
+
+    setChain(
+      chain.map((x) => (x.id === fxId ? { ...x, enabled: !x.enabled } : x))
+    );
+
+    // ✅ Wire syscall (backend accepts, seq bumps)
+    intent?.({ name: "toggleFx", fxGuid: fxId, value: nextEnabled });
   }
 
   function removeFx(fxId) {
-    setChain(chain.filter((fx) => fx.id !== fxId));
-    console.log("remove fx", { trackId, fxId });
+    setChain(chain.filter((x) => x.id !== fxId));
+    // later: removeFx syscall
+    console.log("remove fx", { trackGuid, fxId });
   }
 
   function reorderFx(srcId, dstId) {
     if (!srcId || !dstId || srcId === dstId) return;
+
     const srcIdx = chain.findIndex((x) => x.id === srcId);
     const dstIdx = chain.findIndex((x) => x.id === dstId);
     if (srcIdx < 0 || dstIdx < 0) return;
@@ -283,11 +298,12 @@ function TrackDetailCard({ trackId }) {
     next.splice(dstIdx, 0, moved);
     setChain(next);
 
-    console.log("reorder fx", { trackId, from: srcIdx, to: dstIdx });
+    // ✅ Wire syscall (backend accepts, seq bumps)
+    intent?.({ name: "reorderFx", trackGuid, fromIndex: srcIdx, toIndex: dstIdx });
   }
 
   function goParams(fxId) {
-    nav(`/edit/plugin/${encodeURIComponent(trackId)}/${encodeURIComponent(fxId)}`);
+    nav(`/edit/plugin/${encodeURIComponent(trackGuid)}/${encodeURIComponent(fxId)}`);
   }
 
   function onDragStart(e, fxId) {
@@ -295,7 +311,9 @@ function TrackDetailCard({ trackId }) {
     e.dataTransfer.effectAllowed = "move";
     try {
       e.dataTransfer.setData("text/plain", fxId);
-    } catch { }
+    } catch {
+      // ignore
+    }
   }
   function onDragOver(e) {
     e.preventDefault();
@@ -303,6 +321,7 @@ function TrackDetailCard({ trackId }) {
   }
   function onDrop(e, dstId) {
     e.preventDefault();
+
     const srcId =
       dragSrcIdRef.current ||
       (() => {
@@ -323,7 +342,27 @@ function TrackDetailCard({ trackId }) {
     <Panel className="h-full min-h-0 flex flex-col">
       <div className="p-4 flex-1 min-h-0">
         <div className="grid grid-cols-12 gap-3 h-full min-h-0">
+          {/* LEFT: Chain */}
           <Inset className="col-span-7 h-full min-h-0 p-3 flex flex-col gap-3">
+            {/* ✅ NEW: Mix controls row (left column only) */}
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[14px] font-semibold tracking-wide text-white">
+                  {trackGuid.replace(/_(?=[A-Z]$)/, "")}
+                </div>
+
+                {/* Your TrackMixControls stays here */}
+              </div>
+
+              <div className="flex items-center gap-2">
+                {/* TrackMixControls uses your shared Slider control */}
+                <TrackMixControls trackGuid={trackGuid} />
+              </div>
+            </div>
+
+            <div className="h-px bg-white/10" />
+
+            {/* ✅ PLUGINS header moved down */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="text-[11px] font-semibold tracking-wide text-white/70">
@@ -368,6 +407,7 @@ function TrackDetailCard({ trackId }) {
             </div>
           </Inset>
 
+          {/* RIGHT: Installed plugins (UNCHANGED) */}
           <div className="col-span-5 h-full min-h-0">
             <InstalledFxShell
               className="h-full"
@@ -396,16 +436,17 @@ export function EditView() {
 
   const vm = useVM();
 
-  // ✅ Core mutation entrypoint
-  const { dispatchIntent } = useRfxActions();
-  const activeBusId = vm.activeBusId || vm.buses?.[0]?.id || "FX_1";
+  // ✅ UI command boundary
+  const intent = useIntent();
+
+  const activeBusId = vm?.activeBusId || vm?.buses?.[0]?.id || "FX_1";
   const bus =
-    vm.buses?.find?.((b) => b.id === activeBusId) || {
+    vm?.buses?.find?.((b) => b.id === activeBusId) || {
       id: activeBusId,
       label: activeBusId,
     };
 
-  const mode = normalizeMode((vm.busModes && vm.busModes[bus.id]) || "linear");
+  const mode = normalizeMode((vm?.busModes && vm.busModes[bus.id]) || "linear");
 
   const [laneByBus, setLaneByBus] = React.useState({});
   const lane = nextValidLane(mode, laneByBus[bus.id]);
@@ -424,13 +465,10 @@ export function EditView() {
 
   function setMode(nextMode) {
     const m = normalizeMode(nextMode);
-
-    // ✅ was transport.syscall({ name:"setStateMode"... })
-    // now: canonical intent
-    dispatchIntent({ name: "setRoutingMode", busId: bus.id, mode: m });
+    intent({ name: "setRoutingMode", busId: bus.id, mode: m });
   }
 
-  const trackId = `${bus.id}_${lane}`;
+  const trackGuid = `${bus.id}_${lane}`;
 
   return (
     <div className="h-full w-full p-3 min-h-0">
@@ -451,14 +489,21 @@ export function EditView() {
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="text-[11px] text-white/50 tracking-wide">MODE</div>
-              <ModeSelector mode={mode} onChange={setMode} />
+              {/* ✅ BUS volume only (stays in header) */}
+              <BusMixControls busId={bus.id} intent={intent} />
+
+              <div className="h-6 w-px bg-white/10 mx-1" />
+
+              <div className="flex items-center gap-2">
+                <div className="text-[11px] text-white/50 tracking-wide">MODE</div>
+                <ModeSelector mode={mode} onChange={setMode} />
+              </div>
             </div>
           </div>
         </Panel>
 
         <div className="flex-1 min-h-0">
-          <TrackDetailCard trackId={trackId} />
+          <TrackDetailCard trackGuid={trackGuid} intent={intent} />
         </div>
       </div>
     </div>
