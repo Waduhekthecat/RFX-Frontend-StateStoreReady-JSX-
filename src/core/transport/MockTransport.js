@@ -1,5 +1,3 @@
-// src/core/transport/MockTransport.js
-
 function clamp01(n) {
   const v = Number(n);
   if (!Number.isFinite(v)) return 0;

@@ -4,102 +4,94 @@
  *
  * Supports TWO input shapes:
  *  1) REAPER snapshot: { schema, seq, ts, reaper, project, selection, transport, session, tracks: [...] }
- *  2) Current MockTransport VM: { buses, activeBusId, routingModes/busModes, meters, schema?, seq?, ts? }
+ *  2) VM-style snapshot (Mock/Electron backend): { buses, activeBusId, busModes/routingModes, meters, schema?, seq?, ts? }
  *
  * Always returns:
  * {
  *   snapshot, reaper, project, selection, transportState,
  *   session: { activeBusId },
- *   entities: { ... },
- *   perf: { ... } | null
+ *   entities: { tracksByGuid, trackOrder, fxByGuid, fxOrderByTrackGuid, routesById, routeIdsByTrackGuid },
+ *   perf: { buses, activeBusId, busModesById } | null
  * }
+ *
+ * Notes:
+ * - Meters are telemetry and should NOT be treated as seq-bearing truth.
+ *   (Store ingests meters via ingestMeters and mirrors into perf.metersById for compatibility.)
+ * - Buses are NOT mapped into entities.tracksByGuid (keeps "bus" separate from "track").
  */
+
+function asStr(x, fallback = "") {
+  const s = x == null ? "" : String(x);
+  return s || fallback;
+}
+
+function asNum(x, fallback = 0) {
+  const n = Number(x);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function ensureSelectionIndex(n) {
+  const v = Number(n);
+  return Number.isFinite(v) ? v : -1;
+}
+
 export function normalize(view) {
+  const v = view || {};
+
   // -----------------------------
-  // Case A: MockTransport VM
+  // Case A: VM-style snapshot (Mock/Electron backend)
   // -----------------------------
-  if (view && Array.isArray(view.buses)) {
-    const buses = view.buses || [];
-    const tracksByGuid = {};
-    const trackOrder = [];
+  if (Array.isArray(v.buses)) {
+    const buses = v.buses || [];
+    const activeBusId = asStr(v.activeBusId, "");
 
-    for (let i = 0; i < buses.length; i++) {
-      const b = buses[i] || {};
-      const guid = String(b.id || "");
-      if (!guid) continue;
+    // accept either key
+    const busModesById =
+      (v.busModes && typeof v.busModes === "object" && v.busModes) ||
+      (v.routingModes && typeof v.routingModes === "object" && v.routingModes) ||
+      {};
 
-      tracksByGuid[guid] = {
-        guid,
-        trackIndex: i,
-        trackNumber: i + 1,
-        name: String(b.label || b.id || `Bus ${i + 1}`),
-
-        parentGuid: "",
-        folderDepth: 0,
-
-        selected: guid === String(view.activeBusId || ""),
-
-        recArm: false,
-        recMon: 0,
-        recMode: 0,
-        recInput: 0,
-
-        mute: false,
-        solo: 0,
-        phaseInvert: false,
-
-        vol: 1,
-        pan: 0,
-        width: 1,
-        panLaw: 0,
-
-        masterSend: true,
-
-        color: 0,
-        tcpHide: 0,
-        mcpHide: 0,
-      };
-
-      trackOrder.push(guid);
-    }
-
-    const activeBusId = String(view.activeBusId || "");
-    const busModesById = view.busModes ?? view.routingModes ?? {}; // ✅ accept either key
+    // For VM-only mode, entities are empty; perf holds the bus world.
+    // selection index is "active bus index" so UI that keys off selection can still work.
+    const selectedTrackIndex = buses.findIndex(
+      (b) => asStr(b?.id, "") === activeBusId
+    );
 
     return {
       snapshot: {
-        seq: Number(view.seq || 0),
-        // ✅ Step #2: prefer the incoming schema field; don’t hardcode
-        schema: String(view.schema || "mock_vm"),
-        ts: Number(view.ts || 0),
+        seq: asNum(v.seq, 0),
+        schema: asStr(v.schema, "mock_vm"),
+        ts: asNum(v.ts, 0),
       },
+
+      // These are placeholders until REAPER backend provides real values
       reaper: { version: "mock", resourcePath: "" },
       project: { name: "Mock", path: "", templateVersion: "mock" },
+
       selection: {
-        selectedTrackIndex: trackOrder.indexOf(activeBusId),
+        selectedTrackIndex: selectedTrackIndex >= 0 ? selectedTrackIndex : -1,
       },
+
       transportState: null,
 
-      // ✅ session block (mirrors what REAPER will write later)
       session: {
         activeBusId,
       },
 
       entities: {
-        tracksByGuid,
-        trackOrder,
+        tracksByGuid: {},
+        trackOrder: [],
         fxByGuid: {},
         fxOrderByTrackGuid: {},
         routesById: {},
         routeIdsByTrackGuid: {},
       },
 
-      // Perf-ish / VM compatibility
       perf: {
         buses,
         activeBusId,
         busModesById,
-        metersById: view.meters || {},
+        // metersById intentionally omitted (telemetry handles it)
       },
     };
   }
@@ -107,35 +99,35 @@ export function normalize(view) {
   // -----------------------------
   // Case B: REAPER snapshot
   // -----------------------------
-  const schema = String(view?.schema || "unknown");
-  const seq = Number(view?.seq || 0);
-  const ts = Number(view?.ts || 0);
+  const schema = asStr(v.schema, "unknown");
+  const seq = asNum(v.seq, 0);
+  const ts = asNum(v.ts, 0);
 
   const reaper = {
-    version: String(view?.reaper?.version || view?.reaperVersion || "unknown"),
-    resourcePath: String(view?.reaper?.resourcePath || ""),
+    version: asStr(v?.reaper?.version ?? v.reaperVersion, "unknown"),
+    resourcePath: asStr(v?.reaper?.resourcePath, ""),
   };
 
   const project = {
-    name: String(view?.project?.name || view?.projectName || ""),
-    path: String(view?.project?.path || view?.projectPath || ""),
-    templateVersion: String(
-      view?.project?.templateVersion || view?.templateVersion || "unknown"
+    name: asStr(v?.project?.name ?? v.projectName, ""),
+    path: asStr(v?.project?.path ?? v.projectPath, ""),
+    templateVersion: asStr(
+      v?.project?.templateVersion ?? v.templateVersion,
+      "unknown"
     ),
   };
 
   const selection = {
-    selectedTrackIndex: Number(view?.selection?.selectedTrackIndex ?? -1),
+    selectedTrackIndex: ensureSelectionIndex(v?.selection?.selectedTrackIndex),
   };
 
-  const transportState = view?.transport || null;
+  const transportState = v?.transport || null;
 
-  // ✅ session block from REAPER
   const session = {
-    activeBusId: String(view?.session?.activeBusId || ""),
+    activeBusId: asStr(v?.session?.activeBusId, ""),
   };
 
-  const tracks = Array.isArray(view?.tracks) ? view.tracks : [];
+  const tracks = Array.isArray(v?.tracks) ? v.tracks : [];
 
   const tracksByGuid = {};
   const trackOrder = [];
@@ -145,39 +137,41 @@ export function normalize(view) {
   const routeIdsByTrackGuid = {};
 
   for (const tr of tracks) {
-    const guid = String(tr?.trackGuid || "");
+    const guid = asStr(tr?.trackGuid, "");
     if (!guid) continue;
+
+    const trackIndex = asNum(tr?.trackIndex, 0);
 
     tracksByGuid[guid] = {
       guid,
-      trackIndex: Number(tr?.trackIndex ?? 0),
-      trackNumber: Number(tr?.trackNumber ?? 0),
-      name: String(tr?.trackName || ""),
+      trackIndex,
+      trackNumber: asNum(tr?.trackNumber, trackIndex + 1),
+      name: asStr(tr?.trackName, ""),
 
-      parentGuid: String(tr?.parentGuid || ""),
-      folderDepth: Number(tr?.folderDepth ?? 0),
+      parentGuid: asStr(tr?.parentGuid, ""),
+      folderDepth: asNum(tr?.folderDepth, 0),
 
       selected: !!tr?.selected,
 
       recArm: !!tr?.recArm,
-      recMon: Number(tr?.recMon ?? 0),
-      recMode: Number(tr?.recMode ?? 0),
-      recInput: Number(tr?.recInput ?? 0),
+      recMon: asNum(tr?.recMon, 0),
+      recMode: asNum(tr?.recMode, 0),
+      recInput: asNum(tr?.recInput, 0),
 
       mute: !!tr?.mute,
-      solo: Number(tr?.solo ?? 0),
+      solo: asNum(tr?.solo, 0),
       phaseInvert: !!tr?.phaseInvert,
 
-      vol: Number(tr?.vol ?? 1),
-      pan: Number(tr?.pan ?? 0),
-      width: Number(tr?.width ?? 1),
-      panLaw: Number(tr?.panLaw ?? 0),
+      vol: asNum(tr?.vol, 1),
+      pan: asNum(tr?.pan, 0),
+      width: asNum(tr?.width, 1),
+      panLaw: asNum(tr?.panLaw, 0),
 
       masterSend: !!tr?.masterSend,
 
-      color: Number(tr?.color ?? 0),
-      tcpHide: Number(tr?.tcpHide ?? 0),
-      mcpHide: Number(tr?.mcpHide ?? 0),
+      color: asNum(tr?.color, 0),
+      tcpHide: asNum(tr?.tcpHide, 0),
+      mcpHide: asNum(tr?.mcpHide, 0),
     };
 
     trackOrder.push(guid);
@@ -185,35 +179,42 @@ export function normalize(view) {
     // FX
     const fxArr = Array.isArray(tr?.fx) ? tr.fx : [];
     const fxGuids = [];
+
     for (const fx of fxArr) {
-      const fxGuid = String(fx?.fxGuid || "");
+      const fxGuid = asStr(fx?.fxGuid, "");
       if (!fxGuid) continue;
+
       fxByGuid[fxGuid] = {
         guid: fxGuid,
         trackGuid: guid,
-        fxIndex: Number(fx?.fxIndex ?? 0),
-        name: String(fx?.fxName || ""),
+        fxIndex: asNum(fx?.fxIndex, 0),
+        name: asStr(fx?.fxName, ""),
         enabled: fx?.enabled !== false,
         offline: !!fx?.offline,
       };
+
       fxGuids.push(fxGuid);
     }
+
     fxOrderByTrackGuid[guid] = fxGuids;
 
     // Routing edges
     const sends = Array.isArray(tr?.routing?.sends) ? tr.routing.sends : [];
-    const receives = Array.isArray(tr?.routing?.receives) ? tr.routing.receives : [];
+    const receives = Array.isArray(tr?.routing?.receives)
+      ? tr.routing.receives
+      : [];
 
     const sendIds = [];
     const recvIds = [];
 
     for (const e of sends) {
-      const id = `${guid}:send:${Number(e?.index ?? 0)}`;
+      const id = `${guid}:send:${asNum(e?.index, 0)}`;
       routesById[id] = normalizeEdge(id, guid, "send", e);
       sendIds.push(id);
     }
+
     for (const e of receives) {
-      const id = `${guid}:receive:${Number(e?.index ?? 0)}`;
+      const id = `${guid}:receive:${asNum(e?.index, 0)}`;
       routesById[id] = normalizeEdge(id, guid, "receive", e);
       recvIds.push(id);
     }
@@ -221,6 +222,7 @@ export function normalize(view) {
     routeIdsByTrackGuid[guid] = { sends: sendIds, receives: recvIds };
   }
 
+  // Ensure stable order by trackIndex
   trackOrder.sort(
     (a, b) =>
       (tracksByGuid[a]?.trackIndex ?? 0) - (tracksByGuid[b]?.trackIndex ?? 0)
@@ -232,7 +234,7 @@ export function normalize(view) {
     project,
     selection,
     transportState,
-    session, // ✅
+    session,
     entities: {
       tracksByGuid,
       trackOrder,
@@ -241,7 +243,7 @@ export function normalize(view) {
       routesById,
       routeIdsByTrackGuid,
     },
-    perf: null,
+    perf: null, // REAPER snapshots can optionally add perf later; safe to keep null now
   };
 }
 
@@ -250,15 +252,15 @@ function normalizeEdge(id, ownerGuid, category, e) {
     id,
     category,
     trackGuid: ownerGuid,
-    srcTrackGuid: String(e?.srcTrackGuid || ""),
-    destTrackGuid: String(e?.destTrackGuid || ""),
-    sendMode: Number(e?.sendMode ?? 0),
-    vol: Number(e?.vol ?? 1),
-    pan: Number(e?.pan ?? 0),
+    srcTrackGuid: asStr(e?.srcTrackGuid, ""),
+    destTrackGuid: asStr(e?.destTrackGuid, ""),
+    sendMode: asNum(e?.sendMode, 0),
+    vol: asNum(e?.vol, 1),
+    pan: asNum(e?.pan, 0),
     mute: !!e?.mute,
     phaseInvert: !!e?.phaseInvert,
     mono: !!e?.mono,
-    srcChan: Number(e?.srcChan ?? 0),
-    dstChan: Number(e?.dstChan ?? 0),
+    srcChan: asNum(e?.srcChan, 0),
+    dstChan: asNum(e?.dstChan, 0),
   };
 }

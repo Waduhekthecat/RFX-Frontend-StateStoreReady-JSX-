@@ -1,5 +1,3 @@
-// src/core/transport/ContractEnforcer.js
-//
 // Vite-safe / browser-safe transport contract wrapper.
 // - No `process` usage
 // - Uses import.meta.env.DEV

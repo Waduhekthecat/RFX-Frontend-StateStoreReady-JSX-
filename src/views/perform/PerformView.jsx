@@ -1,17 +1,10 @@
 import React from "react";
-import { useTransport } from "../../core/transport/TransportProvider";
+import { useRfxStore } from "../../core/rfx/Store";
 import { useRfxActions } from "../../core/rfx/Util";
 import { KnobRow } from "../../components/controls/knobs/KnobRow";
 import { Panel } from "../../components/ui/Panel";
 import { BusCardArea } from "./components/_index";
 import { styles, KNOB_STRIP_H } from "./_styles";
-
-function useVM() {
-  const t = useTransport();
-  const [vm, setVm] = React.useState(() => t.getSnapshot());
-  React.useEffect(() => t.subscribe(setVm), [t]);
-  return vm;
-}
 
 function knobsForContext(ctx) {
   return Array.from({ length: 8 }).map((_, i) => ({
@@ -30,10 +23,25 @@ function normalizeMode(m) {
 }
 
 export function PerformView() {
-  const vm = useVM();
-
-  // ✅ Core mutation entrypoint (via your helper hook)
   const { dispatchIntent } = useRfxActions();
+
+  // Pull normalized bus/perf state from the store
+  const buses = useRfxStore((s) => s.perf?.buses || []);
+  const activeBusId = useRfxStore(
+    (s) => s.perf?.activeBusId || s.meters?.activeBusId || null
+  );
+  const busModesById = useRfxStore((s) => s.perf?.busModesById || {});
+  const metersById = useRfxStore((s) => s.meters?.byId || {});
+
+  // Provide a VM-like object for BusCardArea so you don't have to refactor it yet
+  const vm = React.useMemo(() => {
+    return {
+      buses,
+      activeBusId: activeBusId || (buses[0]?.id ?? "NONE"),
+      busModes: busModesById, // keep the old key name BusCardArea expects
+      meters: metersById,     // if BusCardArea reads meters[busId]
+    };
+  }, [buses, activeBusId, busModesById, metersById]);
 
   const activeId = vm.activeBusId || "NONE";
   const knobs = React.useMemo(() => knobsForContext(activeId), [activeId]);
@@ -45,8 +53,12 @@ export function PerformView() {
         <div className={styles.Top}>
           <BusCardArea
             vm={vm}
-            getRoutingMode={(busId) => normalizeMode(vm?.busModes?.[busId] || "linear")}
-            onSelectBus={(busId) => dispatchIntent({ name: "selectActiveBus", busId })}
+            getRoutingMode={(busId) =>
+              normalizeMode(vm?.busModes?.[busId] || "linear")
+            }
+            onSelectBus={(busId) =>
+              dispatchIntent({ name: "selectActiveBus", busId })
+            }
           />
         </div>
 
