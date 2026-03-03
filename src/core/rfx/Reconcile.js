@@ -634,7 +634,7 @@ function computeCollapsedSet(pendingOrder, pendingById) {
     }
 
     if (kind === "setBusVolume") {
-      const k = canonicalTrackGuid(intent.trackGuid);
+      const k = String(intent.busId || "");
       if (!k) continue;
       if (lastBusVol.has(k)) collapsed.add(lastBusVol.get(k));
       lastBusVol.set(k, opId);

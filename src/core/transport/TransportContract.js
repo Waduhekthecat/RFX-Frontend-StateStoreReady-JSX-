@@ -18,9 +18,14 @@
  *   | { name: "toggleMute",   trackGuid: string, value: boolean }
  *   | { name: "toggleSolo",   trackGuid: string, value: boolean }
  *   | { name: "setVol",       trackGuid: string, value: number }
+ *   | { name: "setTrackPan",       trackGuid: string, value: number }
+ *   | { name: "setTrackVolume",       trackGuid: string, value: number }
+ *   | { name: "setBusVolume",       trackGuid: string, value: number }
  *   | { name: "setPan",       trackGuid: string, value: number }
  *   | { name: "toggleFx",     fxGuid: string, value: boolean }
  *   | { name: "reorderFx",    trackGuid: string, fromIndex: number, toIndex: number }
+ *   | { name: "getPluginParams", fxGuid: string }
+ *   | { name: "setParamValue", fxGuid: string, paramIdx: number, value01: number }
  *   | { name: string, [k: string]: any } // escape hatch (keep last)
  * )} Syscall
  */

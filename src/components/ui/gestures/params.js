@@ -1,6 +1,9 @@
 // Single source of truth for gesture tuning across the app.
 // Hooks import defaults from here, but callers can override per-use.
 
+// Example of override from a component: 
+// const dbl = useDoubleTap(reset, { thresholdMs: 350 });
+
 export const gestureParams = {
   doubleTap: {
     thresholdMs: 280,  // max time between taps

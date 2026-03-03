@@ -6,15 +6,6 @@ import { Panel } from "../../components/ui/Panel";
 import { BusCardArea } from "./components/_index";
 import { styles, KNOB_STRIP_H } from "./_styles";
 
-function knobsForContext(ctx) {
-  return Array.from({ length: 8 }).map((_, i) => ({
-    id: `${ctx || "NONE"}_k${i + 1}`,
-    label: `K${i + 1}`,
-    value: 0.5,
-    mapped: false,
-  }));
-}
-
 function normalizeMode(m) {
   const x = String(m || "linear").toLowerCase();
   if (x === "lcr") return "lcr";
@@ -24,6 +15,9 @@ function normalizeMode(m) {
 
 export function PerformView() {
   const intent = useIntent();
+  const knobValuesByBusId = useRfxStore((s) => s.perf?.knobValuesByBusId || {});
+  const knobMapByBusId = useRfxStore((s) => s.perf?.knobMapByBusId || {});
+  const mappingArmed = useRfxStore((s) => s.perf?.mappingArmed || null);
 
   // Pull normalized bus/perf state from the store
   const buses = useRfxStore((s) => s.perf?.buses || []);
@@ -44,7 +38,30 @@ export function PerformView() {
   }, [buses, activeBusId, busModesById, metersById]);
 
   const activeId = vm.activeBusId || "NONE";
-  const knobs = React.useMemo(() => knobsForContext(activeId), [activeId]);
+
+  const knobs = React.useMemo(() => {
+    const busId = String(activeId || "NONE");
+    const values = knobValuesByBusId?.[busId] || {};
+    const maps = knobMapByBusId?.[busId] || {};
+
+    // 8 defined, KnobRow will show first 7
+    return Array.from({ length: 8 }).map((_, i) => {
+      const knobId = `${busId}_k${i + 1}`;
+      const target = maps[knobId] || null;
+
+      const mappedLabel = target
+        ? `${target.fxName || "FX"} • ${target.paramName || `#${target.paramIdx}`}`
+        : "";
+
+      return {
+        id: knobId,
+        label: `K${i + 1}`,
+        value: Number.isFinite(values[knobId]) ? values[knobId] : 0.5,
+        mapped: !!target,
+        mappedLabel,
+      };
+    });
+  }, [activeId, knobValuesByBusId, knobMapByBusId]);
 
   return (
     <div className={styles.Root}>
@@ -67,7 +84,7 @@ export function PerformView() {
           className={styles.KnobPanel}
           style={{ height: KNOB_STRIP_H, flex: `0 0 ${KNOB_STRIP_H}px` }}
         >
-          <KnobRow knobs={knobs} />
+          <KnobRow knobs={knobs} busId={activeId} mappingArmed={mappingArmed} />
         </Panel>
       </div>
     </div>

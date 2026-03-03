@@ -72,6 +72,10 @@ function mergeOverlay(base, patch) {
       ...(base.fxOrderByTrackGuid || {}),
       ...(patch.fxOrderByTrackGuid || {}),
     },
+    fxParamsByGuid: {
+      ...(base.fxParamsByGuid || {}),
+      ...(patch.fxParamsByGuid || {}),
+    },
   };
 }
 
@@ -155,6 +159,10 @@ export const useRfxStore = create((set, get) => ({
     activeBusId: null,
     busModesById: null,
     metersById: null, // we will source this from meters.byId
+    knobValuesByBusId: {},   // { [busId]: { [knobId]: value01 } }
+    knobMapByBusId: {},      // { [busId]: { [knobId]: KnobTarget } }
+    mappingArmed: null,
+
   },
 
   // ---------------------------
@@ -177,6 +185,7 @@ export const useRfxStore = create((set, get) => ({
       bus: {},
       fx: {},
       fxOrderByTrackGuid: {},
+      fxParamsByGuid: {},
     },
     lastError: null,
 
@@ -319,11 +328,17 @@ export const useRfxStore = create((set, get) => ({
       // not from snapshot normalization. Snapshot is truth state.
       perf: norm.perf
         ? {
+          // truth-ish perf fields
           buses: norm.perf.buses,
           activeBusId: norm.perf.activeBusId,
           busModesById:
             norm.perf.busModesById ?? norm.perf.routingModesById ?? null,
           metersById: s.meters.byId || s.perf.metersById || null,
+
+          // preserve RFX-owned perf fields
+          knobValuesByBusId: s.perf.knobValuesByBusId || {},
+          knobMapByBusId: s.perf.knobMapByBusId || {},
+          mappingArmed: s.perf.mappingArmed ?? null,
         }
         : {
           ...s.perf,
@@ -529,8 +544,134 @@ export const useRfxStore = create((set, get) => ({
   },
 
   // ------------------------------------------------------------
+  // ✅ Perf knob mapping helpers (RFX-owned, no transport)
+  // ------------------------------------------------------------
+
+  armKnobMapping: (payload) => {
+    const p = payload || {};
+    const busId = String(p.busId || "");
+    const fxGuid = String(p.fxGuid || "");
+    const trackGuid = String(p.trackGuid || "");
+    const paramIdx = Number(p.paramIdx);
+    const knobId = p.knobId ? String(p.knobId) : "";
+
+    if (!busId || !fxGuid || !trackGuid || !Number.isFinite(paramIdx)) return;
+
+    // Only log "armed" once a knob is chosen (your requirement)
+    if (knobId) {
+      const m = knobId.match(/_k(\d+)$/);
+      const knobIndex = m ? Number(m[1]) : null;
+
+      get().logEvent(
+        "knobmap:armed",
+        {
+          busId,
+          knobId,
+          knobIndex,
+          trackGuid,
+          fxGuid,
+          paramIdx,
+          label: p.label || "",
+        },
+        null
+      );
+    }
+
+    set((s) => ({
+      perf: {
+        ...s.perf,
+        mappingArmed: {
+          busId,
+          knobId: knobId || undefined,
+          trackGuid,
+          fxGuid,
+          paramIdx,
+          label: String(p.label || p.paramName || `Param ${paramIdx}`),
+          fxName: p.fxName ? String(p.fxName) : undefined,
+          trackName: p.trackName ? String(p.trackName) : undefined,
+          paramName: p.paramName ? String(p.paramName) : undefined,
+        },
+      },
+    }));
+  },
+
+  clearKnobMappingArmed: () => {
+    set((s) => ({ perf: { ...s.perf, mappingArmed: null } }));
+  },
+
+  commitKnobMapping: (payload) => {
+    const p = payload || {};
+    const busId = String(p.busId || "");
+    const knobId = String(p.knobId || "");
+    const trackGuid = String(p.trackGuid || "");
+    const fxGuid = String(p.fxGuid || "");
+    const paramIdx = Number(p.paramIdx);
+
+    if (!busId || !knobId || !trackGuid || !fxGuid || !Number.isFinite(paramIdx)) {
+      return;
+    }
+
+    const m = knobId.match(/_k(\d+)$/);
+    const knobIndex = m ? Number(m[1]) : null;
+
+    const target = {
+      busId,
+      knobId,
+      trackGuid,
+      fxGuid,
+      paramIdx,
+      paramName: p.paramName || p.label || undefined,
+      fxName: p.fxName || undefined,
+      trackName: p.trackName || undefined,
+    };
+
+    // ✅ Single clean log
+    get().logEvent("knobmap:committed", {
+      ...target,
+      knobIndex,
+    });
+
+    set((s) => ({
+      perf: {
+        ...s.perf,
+        knobMapByBusId: {
+          ...(s.perf.knobMapByBusId || {}),
+          [busId]: {
+            ...((s.perf.knobMapByBusId || {})[busId] || {}),
+            [knobId]: target,
+          },
+        },
+      },
+    }));
+  },
+
+  setKnobValueLocal: ({ busId, knobId, value01 }) => {
+    const b = String(busId || "");
+    const k = String(knobId || "");
+    const v = Number(value01);
+    if (!b || !k || !Number.isFinite(v)) return;
+
+    const clamped = Math.max(0, Math.min(1, v));
+
+    set((s) => ({
+      perf: {
+        ...s.perf,
+        knobValuesByBusId: {
+          ...(s.perf.knobValuesByBusId || {}),
+          [b]: {
+            ...((s.perf.knobValuesByBusId || {})[b] || {}),
+            [k]: clamped,
+          },
+        },
+      },
+    }));
+  },
+
+  // ------------------------------------------------------------
   // Session helpers
   // ------------------------------------------------------------
+
+
   setActiveTrackGuid: (trackGuid) =>
     set((s) => ({ session: { ...s.session, activeTrackGuid: trackGuid } })),
 
