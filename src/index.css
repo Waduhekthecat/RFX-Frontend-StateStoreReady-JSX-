@@ -2,7 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
-html, body, #root { height: 100%; }
+html,
+body,
+#root {
+  width: 1280px;
+  height: 800px;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+}
 body {
 display: flex;
 align-items: center;

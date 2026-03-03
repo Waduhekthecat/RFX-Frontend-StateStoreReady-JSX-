@@ -2,10 +2,14 @@ import React from "react";
 import { Slider } from "../../../../components/controls/sliders/_index";
 import { useIntentBuffered } from "../../../../core/useIntentBuffered";
 import { useRfxStore } from "../../../../core/rfx/Store";
-import { useDoubleTap, Surface } from "../../../../components/ui/gestures/_index";
+import { useDoubleTap, useScrubValue, Surface } from "../../../../components/ui/gestures/_index";
 
 const DEFAULT_TRACK_VOL01 = 0.8;
 const DEFAULT_TRACK_PAN01 = 0.5;
+
+// Tune feel
+const VOL_SENSITIVITY = 0.0035; // ~200px full sweep
+const PAN_SENSITIVITY = 0.006;  // pan usually feels better a bit faster
 
 function clamp01(n) {
   const v = Number(n);
@@ -47,13 +51,11 @@ function selectTrackPan01(s, trackGuid) {
   const tm = s?.snapshot?.trackMix?.[trackGuid];
   const tr = s?.entities?.tracksByGuid?.[trackGuid];
 
-  // 1) If any explicit pan01 exists, use it directly (already 0..1)
+  // 1) pan01 explicitly (0..1)
   const pan01 = patch?.pan01 ?? tm?.pan01 ?? tr?.pan01;
-  if (Number.isFinite(Number(pan01))) {
-    return clamp01(pan01);
-  }
+  if (Number.isFinite(Number(pan01))) return clamp01(pan01);
 
-  // 2) Otherwise treat `pan` as signed -1..1 (center=0)
+  // 2) signed pan (-1..1), center=0
   const panSigned = patch?.pan ?? tm?.pan ?? tr?.pan ?? 0;
   const p = clamp(Number(panSigned), -1, 1);
   return (p + 1) / 2;
@@ -87,13 +89,13 @@ export function TrackMixControls({ trackGuid }) {
     if (!isDraggingRef.current) return;
     isDraggingRef.current = false;
     flush();
-    // ✅ Do NOT snap to truth here (truth might be stale briefly)
+    // ✅ don't snap to truth here
   }
 
   const keyVol = `${trackGuid}:trackVol`;
   const keyPan = `${trackGuid}:trackPan`;
 
-  // ✅ Double-tap reset handlers (send + immediate flush so it feels instant)
+  // Reset handlers (double-tap)
   const resetTrackVol = React.useCallback(() => {
     const next = DEFAULT_TRACK_VOL01;
     setLiveVol01(next);
@@ -108,17 +110,41 @@ export function TrackMixControls({ trackGuid }) {
     flush();
   }, [flush, keyPan, send, trackGuid]);
 
-  // Hooks must be called inside the component ✅
   const dblVol = useDoubleTap(resetTrackVol);
   const dblPan = useDoubleTap(resetTrackPan);
 
+  // Scrub gestures drive the value (no tap-to-jump)
+  const volScrub = useScrubValue({
+    value: liveVol01,
+    accel: { enabled: true, exponent: 1.7, accel: 0.02 },
+    min: 0,
+    max: 1,
+    sensitivity: VOL_SENSITIVITY,
+    onChange: (next) => {
+      isDraggingRef.current = true;
+      setLiveVol01(next);
+      send(keyVol, { name: "setTrackVolume", trackGuid, value: next });
+    },
+    onEnd: () => endGesture(),
+  });
+
+  const panScrub = useScrubValue({
+    value: livePan01,
+    accel: { enabled: true, exponent: 1.4, accel: 0.01 },
+    min: 0,
+    max: 1,
+    sensitivity: PAN_SENSITIVITY,
+    onChange: (next) => {
+      isDraggingRef.current = true;
+      setLivePan01(next);
+      send(keyPan, { name: "setTrackPan", trackGuid, value: next * 2 - 1 });
+    },
+    onEnd: () => endGesture(),
+  });
+
   return (
-    <div
-      className="flex items-center gap-2"
-      onPointerUp={endGesture}
-      onPointerCancel={endGesture}
-    >
-      <Surface gesture={dblVol}>
+    <div className="flex items-center gap-2">
+      <Surface gestures={[volScrub, dblVol]}>
         <Slider
           label="VOL"
           min={0}
@@ -127,16 +153,12 @@ export function TrackMixControls({ trackGuid }) {
           value={liveVol01}
           valueText={`${Math.round(liveVol01 * 100)}%`}
           widthClass="w-[160px]"
-          onChange={(v) => {
-            isDraggingRef.current = true;
-            const next = clamp01(v);
-            setLiveVol01(next);
-            send(keyVol, { name: "setTrackVolume", trackGuid, value: next });
-          }}
+          // Interaction handled by scrub Surface (no tap-to-jump)
+          onChange={() => { }}
         />
       </Surface>
 
-      <Surface gesture={dblPan}>
+      <Surface gestures={[panScrub, dblPan]}>
         <Slider
           label="PAN"
           min={0}
@@ -145,12 +167,7 @@ export function TrackMixControls({ trackGuid }) {
           value={livePan01}
           valueText={panTextFrom01(livePan01)}
           widthClass="w-[160px]"
-          onChange={(v) => {
-            isDraggingRef.current = true;
-            const next = clamp01(v);
-            setLivePan01(next);
-            send(keyPan, { name: "setTrackPan", trackGuid, value: next * 2 - 1 });
-          }}
+          onChange={() => { }}
         />
       </Surface>
     </div>

@@ -183,6 +183,7 @@ function createWindow() {
     width: 1280,
     height: 800,
     show: true,
+    useContentSize: true,
     backgroundColor: "#0b0b0e",
     webPreferences: {
       preload: new URL("./preload.js", import.meta.url).pathname,
@@ -191,6 +192,7 @@ function createWindow() {
       sandbox: true,
     },
   });
+  
 
   backend.attachWindow(mainWindow);
 
