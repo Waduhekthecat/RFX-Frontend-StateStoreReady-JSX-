@@ -441,17 +441,30 @@ export const useRFXCore = create((set, get) => ({
     assertCanAddFx(base);
 
     const localFxId = newLocalFxId(trackId);
+    const fxRaw = plugin?.fxRaw || plugin?.raw || plugin?.name || "";
+    const fxName = plugin?.name || fxRaw || "Plugin";
+
     const fx = { id: localFxId, plugin, enabled: true };
     const nextChain = addFxToChain(base, fx);
 
-    const op = makePendingOp("addFx", trackId, { plugin, localFxId });
+    const op = makePendingOp("addFx", trackId, {
+      trackGuid: trackId,
+      localFxId,
+      fxRaw,
+      fxName,
+      enabled: true,
+    });
 
     set({
       overlay: putOverlayChain(s.overlay, nextChain),
       pendingOps: [...s.pendingOps, op],
     });
 
-    s.transport?.syscall?.("addFx", { trackId, plugin, opId: op.opId });
+    s.transport?.syscall?.("addFx", {
+      trackGuid: trackId,
+      fxRaw,
+      opId: op.opId,
+    });
 
     return op.opId;
   },

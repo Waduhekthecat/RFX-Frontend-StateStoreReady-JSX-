@@ -189,7 +189,7 @@ Used for deterministic reconciliation.
 1. UI calls:
 
    ```
-   RFXCore.addFx(trackId, plugin)
+   RFXCore.addFx(trackGuid, fxGuid)
    ```
 
 2. RFXCore:
@@ -240,10 +240,10 @@ Selectors must return **effective (snapshot + overlay) state**.
 
 ## Actions
 
-- `addFx(trackId, plugin)`  
-- `removeFx(trackId, fxId)`  
-- `toggleFx(trackId, fxId)`  
-- `reorderFx(trackId, from, to)`  
+- `addFx(trackGuid, fxRaw)`  
+- `removeFx(trackGuid, fxGuid)`  
+- `toggleFx(trackGuid, fxGuid)`  
+- `reorderFx(trackGuid, from, to)`  
 - `commitSnapshot(snapshot)`  
 - `markOpFailed(opId)`  
 

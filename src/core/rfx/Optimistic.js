@@ -42,28 +42,31 @@ export function buildOptimistic(state, intent) {
     // ---------------------------
     case "addFx": {
       const trackGuid = canonicalTrackGuid(intent?.trackGuid);
-      const fxGuid = String(intent?.fxGuid || "");
-      if (!trackGuid || !fxGuid) return null;
+      const localFxId = String(intent?.localFxId || intent?.fxGuid || "");
+      if (!trackGuid || !localFxId) return null;
 
-      const fxName = String(intent?.fxName || "Plugin");
+      const fxName =
+        String(intent?.fxName || intent?.fxRaw || "Plugin");
+
       const vendor = String(intent?.fxVendor || "");
       const format = String(intent?.fxFormat || "");
       const enabled = intent?.enabled !== false;
 
       const baseOrder = state?.entities?.fxOrderByTrackGuid?.[trackGuid] || [];
-      const nextOrder = baseOrder.concat([fxGuid]);
+      const nextOrder = baseOrder.concat([localFxId]);
 
       return {
         fx: {
-          [fxGuid]: {
-            guid: fxGuid,
+          [localFxId]: {
+            guid: localFxId,
             trackGuid,
             fxIndex: nextOrder.length - 1,
             name: fxName,
             vendor,
             format,
             enabled,
-            raw: intent?.raw ?? null,
+            raw: intent?.fxRaw ?? intent?.raw ?? null,
+            optimistic: true,
           },
         },
         fxOrderByTrackGuid: { [trackGuid]: nextOrder },

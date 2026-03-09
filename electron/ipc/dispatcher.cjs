@@ -95,14 +95,17 @@ function makePayload(call) {
         value: clampPan(call.value ?? call.pan),
       };
 
-    case "addFx":
+    case "addFx": {
+      const fxRaw = asStr(call.fxRaw ?? call.raw, "");
       return {
         trackGuid: normTrackId(call.trackGuid || call.trackId),
-        fxName: asStr(call.fxName ?? call.pluginName ?? call.title, "Plugin"),
+        fxRaw,
+        fxName: asStr(call.fxName ?? call.pluginName ?? call.title, fxRaw || "Plugin"),
         fxVendor: asStr(call.fxVendor ?? call.vendor, ""),
         fxFormat: asStr(call.fxFormat ?? call.format, ""),
         enabled: call.enabled !== false,
       };
+    }
 
     case "removeFx":
       return {

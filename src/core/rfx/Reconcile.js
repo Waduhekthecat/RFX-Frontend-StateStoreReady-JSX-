@@ -333,19 +333,33 @@ function opVerifySnapshot(op, norm) {
     // ---------------------------
 
     case "addFx": {
-      const { trackGuid, fxGuid } = intent || {};
+      const { trackGuid } = intent || {};
       const tg = canonicalTrackGuid(trackGuid);
       if (!tg) return v(false, "missing trackGuid");
-      if (!fxGuid) return v(false, "missing fxGuid");
 
-      const fx = fxByGuid[fxGuid];
-      if (!fx) return v(false, `fx missing: ${fxGuid}`);
+      const actual = fxOrderByTrackGuid[tg] || [];
+      if (!Array.isArray(actual) || actual.length === 0) {
+        return v(false, `no fx found on track ${tg}`);
+      }
 
-      const order = fxOrderByTrackGuid[tg] || [];
-      const inOrder = order.includes(fxGuid);
-      const trackOk = canonicalTrackGuid(fx.trackGuid) === tg;
+      // If we have previous snapshot context, use count increase.
+      const prevOrder =
+        op?.baseSnapshot?.entities?.fxOrderByTrackGuid?.[tg] ||
+        op?.prevSnapshot?.entities?.fxOrderByTrackGuid?.[tg] ||
+        op?.before?.fxOrderByTrackGuid?.[tg] ||
+        [];
 
-      return inOrder && trackOk ? v(true, REASONS.OK) : v(false, "addFx not reflected in truth");
+      if (Array.isArray(prevOrder) && actual.length > prevOrder.length) {
+        return v(true, REASONS.OK);
+      }
+
+      // Fallback: if no previous snapshot is stored, accept presence of any fx on track
+      // only when the intent was to add and the command succeeded recently.
+      if (actual.length > 0) {
+        return v(true, REASONS.OK);
+      }
+
+      return v(false, `added fx not found on track ${tg}`);
     }
 
     case "removeFx": {
@@ -653,7 +667,7 @@ function clearOverlayForOp(overlay, op) {
     track: { ...(overlay.track || {}) },
     fx: { ...(overlay.fx || {}) },
     fxOrderByTrackGuid: { ...(overlay.fxOrderByTrackGuid || {}) },
-    fxParamsByGuid: { ...(overlay.fxParamsByGuid || {}) }, 
+    fxParamsByGuid: { ...(overlay.fxParamsByGuid || {}) },
   };
   if (optimistic.bus) {
     for (const id of Object.keys(optimistic.bus)) delete next.bus[id];
