@@ -80,20 +80,7 @@ export function normalize(view) {
       const label = asStr(tr?.label, guid);
       const lane = asStr(tr?.lane, "");
       const busId = asStr(tr?.busId, "");
-
-      // recArm inference for VM-style exports:
-      // if lane participation is implied by routing mode + active bus,
-      // set the currently active bus lanes as armed.
-      // This keeps selectActiveBus / setRoutingMode verification meaningful
-      // even before full routing export exists.
-      const mode = normalizeMode(busModesById[busId] || "linear");
-      let recArm = false;
-
-      if (busId && busId === activeBusId) {
-        if (lane === "A") recArm = true;
-        else if (lane === "B") recArm = mode === "parallel" || mode === "lcr";
-        else if (lane === "C") recArm = mode === "lcr";
-      }
+      const recArm = !!tr?.recArm;
 
       tracksByGuid[guid] = {
         guid,

@@ -139,6 +139,7 @@ export const useRfxStore = create((set, get) => ({
 
     fxByGuid: {},
     fxOrderByTrackGuid: {},
+    fxParamsByGuid: {},
 
     routesById: {},
     routeIdsByTrackGuid: {},

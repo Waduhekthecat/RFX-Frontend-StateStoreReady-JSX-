@@ -18,6 +18,7 @@ const SMOOTH_ALPHA = 0.18;
 const SMOOTH_EPS = 0.0015;
 
 export function ParamCard({
+  trackGuid,
   fxGuid,
   p,
   onChange01,
@@ -28,7 +29,6 @@ export function ParamCard({
 }) {
   const paramIdx = Number(p?.idx ?? 0);
 
-  // ✅ select only stable raw references from store
   const overlayEntry = useRfxStore(
     (s) => s?.ops?.overlay?.fxParamsByGuid?.[fxGuid]?.[paramIdx] ?? null
   );
@@ -40,7 +40,6 @@ export function ParamCard({
       null
   );
 
-  // ✅ derive outside selector
   const truthParam = React.useMemo(() => {
     return (
       manifest?.params?.find?.((x) => Number(x?.idx) === Number(paramIdx)) ?? null
@@ -54,22 +53,27 @@ export function ParamCard({
       ...(overlayEntry || {}),
       idx: Number(
         overlayEntry?.idx ??
-        truthParam?.idx ??
-        p?.idx ??
-        paramIdx
+          truthParam?.idx ??
+          p?.idx ??
+          paramIdx
       ),
       value01: clamp01(
         overlayEntry?.value01 ??
-        truthParam?.value01 ??
-        p?.value01 ??
-        0.5
+          truthParam?.value01 ??
+          p?.value01 ??
+          0.5
       ),
     };
   }, [p, truthParam, overlayEntry, paramIdx]);
 
-  const truth01 = clamp01(liveParam?.value01 ?? 0.5);
+  // Important: truth target should come from actual truth, not overlay
+  const truth01 = clamp01(
+    truthParam?.value01 ??
+      p?.value01 ??
+      0.5
+  );
 
-  const isDraggingRef = React.useRef(false);
+  const [isDragging, setIsDragging] = React.useState(false);
   const [live01, setLive01] = React.useState(truth01);
 
   const rafRef = React.useRef(0);
@@ -78,12 +82,12 @@ export function ParamCard({
   React.useEffect(() => {
     targetRef.current = truth01;
 
-    if (isDraggingRef.current) return;
+    if (isDragging) return;
 
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
 
     const tick = () => {
-      if (isDraggingRef.current) {
+      if (isDragging) {
         rafRef.current = 0;
         return;
       }
@@ -114,22 +118,21 @@ export function ParamCard({
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = 0;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [truth01]);
+  }, [truth01, isDragging, live01]);
 
   function endGesture() {
-    if (!isDraggingRef.current) return;
-    isDraggingRef.current = false;
+    if (!isDragging) return;
+    setIsDragging(false);
     onCommit01?.();
   }
 
   const reset = React.useCallback(() => {
     const next = clamp01(liveParam?.default01 ?? p?.default01 ?? 0.5);
-    isDraggingRef.current = true;
+    setIsDragging(true);
     setLive01(next);
     onChange01?.(liveParam || p, next);
     onCommit01?.();
-    isDraggingRef.current = false;
+    setIsDragging(false);
   }, [liveParam, p, onChange01, onCommit01]);
 
   const dbl = useDoubleTap(reset);
@@ -141,7 +144,7 @@ export function ParamCard({
     max: 1,
     sensitivity: PARAM_SENSITIVITY,
     onChange: (next) => {
-      isDraggingRef.current = true;
+      setIsDragging(true);
       setLive01(next);
       onChange01?.(liveParam || p, next);
     },
@@ -155,13 +158,15 @@ export function ParamCard({
   const subtitle = String(liveParam?.name || "").trim();
 
   const hasLocalOverlayValue =
-    overlayEntry && Number.isFinite(Number(overlayEntry.value01));
+    isDragging &&
+    overlayEntry &&
+    Number.isFinite(Number(overlayEntry.value01));
 
   const valueText = hasLocalOverlayValue
     ? `${Math.round(live01 * 100)}%`
     : liveParam?.fmt != null && String(liveParam.fmt).trim() !== ""
       ? String(liveParam.fmt)
-      : `${Math.round(live01 * 100)}%`;
+      : `${Math.round(truth01 * 100)}%`;
 
   const mapped = Array.isArray(mappedKnobs) && mappedKnobs.length > 0;
   const mappedText = mapped ? `Mapped: ${mappedKnobs.join(", ")}` : "";
@@ -214,7 +219,7 @@ export function ParamCard({
             value={live01}
             valueText={valueText}
             widthClass="w-full"
-            onChange={() => { }}
+            onChange={() => {}}
           />
         </Surface>
       </div>

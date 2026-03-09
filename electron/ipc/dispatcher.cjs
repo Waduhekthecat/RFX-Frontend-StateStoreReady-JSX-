@@ -129,7 +129,6 @@ function makePayload(call) {
 
     case "getPluginParams":
       return {
-        trackGuid: normTrackId(call.trackGuid || call.trackId),
         fxGuid: asStr(call.fxGuid, ""),
       };
 

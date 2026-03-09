@@ -492,25 +492,11 @@ function opVerifySnapshot(op, norm) {
     }
 
     // FX Params fetch (lazy)
-    // for mock: verify snapshot.fxParamsByGuidp[fxGuid] exists after syscall
     // for electron: verify entities.fxParamsByGuidp[fxGuid] exists
     case "getPluginParams": {
       const { fxGuid } = intent || {};
       if (!fxGuid) return v(false, "missing fxGuid");
 
-      // MOCK path
-      if (isMockVm(norm)) {
-        const hit =
-          norm?.entities?.fxParamsByGuid?.[fxGuid] ??
-          norm?.snapshot?.fxParamsByGuid?.[fxGuid];
-
-        if (!hit) return v(false, `mock fx params missing: ${fxGuid}`);
-
-        // ✅ For now, ack on presence (process-first)
-        return v(true, REASONS.OK);
-      }
-
-      // REAL path
       const hit = norm?.entities?.fxParamsByGuid?.[fxGuid];
       if (!hit) return v(false, `fx params missing: ${fxGuid}`);
 

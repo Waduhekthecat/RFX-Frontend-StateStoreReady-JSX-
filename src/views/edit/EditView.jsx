@@ -23,7 +23,6 @@ function useVM() {
 // ---------------------------
 // Canonical IDs
 // ---------------------------
-// FX_1_A -> FX_1A (and FX_12_B -> FX_12B)
 function canonicalTrackGuid(id) {
   return String(id || "").replace(/^([A-Za-z]+_\d+)_([ABC])$/, "$1$2");
 }
@@ -100,10 +99,6 @@ function ModeSelector({ mode, onChange }) {
   );
 }
 
-/**
- * TrackSelector
- * - Shows only valid tracks for current routing mode
- */
 function TrackSelector({ busId, mode, lane, onChange }) {
   const lanes = availableLanes(mode);
 
@@ -231,20 +226,12 @@ function PluginCard({
   );
 }
 
-// ---------------------------
-// TrackDetailCard
-// - ✅ Renders from Core truth (Store entities + overlay)
-// - No local chain state (so navigation won't wipe your FX)
-// ---------------------------
 const EMPTY_ORDER = Object.freeze([]);
 
 function TrackDetailCard({ trackGuid, intent }) {
   const nav = useNavigate();
-
-  // Always canonicalize at boundary
   const tg = React.useMemo(() => canonicalTrackGuid(trackGuid), [trackGuid]);
 
-  // ✅ Stable selector fallback (NO fresh [] per render)
   const order = useRfxStore(
     React.useCallback(
       (s) =>
@@ -256,9 +243,9 @@ function TrackDetailCard({ trackGuid, intent }) {
   );
 
   const fxByGuid = useRfxStore((s) => s.entities.fxByGuid);
-  const fxOverlay = useRfxStore((s) => s.ops.overlay.fx);
+  const fxOverlay = useRfxStore((s) => s.ops.overlay.fx || {});
+  const entities = useRfxStore((s) => s.entities);
 
-  // ✅ Derived chain (memoized)
   const chain = React.useMemo(() => {
     const out = [];
     for (const fxGuid of order || EMPTY_ORDER) {
@@ -266,8 +253,6 @@ function TrackDetailCard({ trackGuid, intent }) {
       if (!base) continue;
       const patch = fxOverlay?.[fxGuid];
       const fx = patch ? { ...base, ...patch } : base;
-
-      // Optional tombstone support (removeFx optimistic)
       if (fx?.removed) continue;
 
       out.push({
@@ -307,7 +292,7 @@ function TrackDetailCard({ trackGuid, intent }) {
   }
 
   function removeFx(fxId) {
-    intent?.({ name: "removeFx", fxGuid: fxId, trackGuid: tg }); // ✅ canonical
+    intent?.({ name: "removeFx", fxGuid: fxId, trackGuid: tg });
   }
 
   function reorderFx(srcId, dstId) {
@@ -317,15 +302,19 @@ function TrackDetailCard({ trackGuid, intent }) {
     const dstIdx = chain.findIndex((x) => x.id === dstId);
     if (srcIdx < 0 || dstIdx < 0) return;
 
-    intent?.({ name: "reorderFx", trackGuid: tg, fromIndex: srcIdx, toIndex: dstIdx }); // ✅ canonical
+    intent?.({ name: "reorderFx", trackGuid: tg, fromIndex: srcIdx, toIndex: dstIdx });
   }
 
   function goParams(fxId) {
-    intent?.({
-      name: "getPluginParams",
-      trackGuid: tg,
-      fxGuid: fxId,
-    })
+    const paramsLoaded = !!entities?.fxParamsByGuid?.[fxId];
+
+    if (!paramsLoaded) {
+      intent?.({
+        name: "getPluginParams",
+        fxGuid: fxId,
+      });
+    }
+
     nav(`/edit/plugin/${encodeURIComponent(tg)}/${encodeURIComponent(fxId)}`);
   }
 
@@ -334,9 +323,7 @@ function TrackDetailCard({ trackGuid, intent }) {
     e.dataTransfer.effectAllowed = "move";
     try {
       e.dataTransfer.setData("text/plain", fxId);
-    } catch {
-      // ignore
-    }
+    } catch {}
   }
 
   function onDragOver(e) {
@@ -367,7 +354,6 @@ function TrackDetailCard({ trackGuid, intent }) {
     <Panel className="h-full min-h-0 flex flex-col">
       <div className="p-4 flex-1 min-h-0">
         <div className="grid grid-cols-12 gap-3 h-full min-h-0">
-          {/* LEFT: Chain */}
           <Inset className="col-span-7 h-full min-h-0 p-3 flex flex-col gap-3">
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center justify-between gap-3">
@@ -375,7 +361,6 @@ function TrackDetailCard({ trackGuid, intent }) {
               </div>
 
               <div className="flex items-center gap-2">
-                {/* ✅ Mix controls should also use canonical trackGuid */}
                 <TrackMixControls trackGuid={tg} />
               </div>
             </div>
@@ -426,7 +411,6 @@ function TrackDetailCard({ trackGuid, intent }) {
             </div>
           </Inset>
 
-          {/* RIGHT: Installed plugins */}
           <div className="col-span-5 h-full min-h-0">
             <InstalledFxShell
               className="h-full"
@@ -445,17 +429,12 @@ function TrackDetailCard({ trackGuid, intent }) {
   );
 }
 
-// ---------------------------
-// EditView
-// ---------------------------
 export function EditView() {
   const location = useLocation();
   const inPluginSubView = location.pathname.startsWith("/edit/plugin/");
   if (inPluginSubView) return <Outlet />;
 
   const vm = useVM();
-
-  // ✅ UI command boundary
   const intent = useIntent();
 
   const activeBusId = vm?.activeBusId || vm?.buses?.[0]?.id || "FX_1";
@@ -487,7 +466,6 @@ export function EditView() {
     intent({ name: "setRoutingMode", busId: bus.id, mode: m });
   }
 
-  // NOTE: historically UI used underscore lane; TrackDetailCard canonicalizes
   const uiTrackGuid = `${bus.id}_${lane}`;
 
   return (
@@ -509,11 +487,8 @@ export function EditView() {
             </div>
 
             <div className="flex items-center gap-2">
-              {/* ✅ BUS volume only (stays in header) */}
               <BusMixControls busId={bus.id} />
-
               <div className="h-6 w-px bg-white/10 mx-1" />
-
               <div className="flex items-center gap-2">
                 <div className="text-[11px] text-white/50 tracking-wide">MODE</div>
                 <ModeSelector mode={mode} onChange={setMode} />
