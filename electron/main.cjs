@@ -1,6 +1,6 @@
 const path = require("path");
 const { app, BrowserWindow, ipcMain } = require("electron");
-
+const osc = require("osc");
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 
 const { dispatchCmdJson } = require("./ipc/dispatcher.cjs");
@@ -13,6 +13,47 @@ let mainWindow = null;
 let liveVm = createFallbackVm();
 let liveInstalledFx = [];
 let watchers = null;
+let oscPort = null;
+
+function ensureOscPort() {
+  if (oscPort) return oscPort;
+
+  oscPort = new osc.UDPPort({
+    localAddress: "127.0.0.1",
+    localPort: 0, // ephemeral sender port
+    remoteAddress: "127.0.0.1",
+    remotePort: 8000, // <-- change this to whatever REAPER-side OSC receiver listens on
+    metadata: true,
+  });
+
+  oscPort.open();
+  return oscPort;
+}
+
+function toOscArg(value) {
+  if (typeof value === "string") return { type: "s", value };
+  if (typeof value === "number") return { type: "f", value };
+  if (typeof value === "boolean") return { type: value ? "T" : "F", value };
+  return { type: "s", value: String(value ?? "") };
+}
+
+async function sendOscPacket(packet) {
+  const address = String(packet?.address || "");
+  const args = Array.isArray(packet?.args) ? packet.args : [];
+
+  if (!address) {
+    throw new Error("sendOscPacket: missing address");
+  }
+
+  const port = ensureOscPort();
+
+  port.send({
+    address,
+    args: args.map(toOscArg),
+  });
+
+  return { ok: true };
+}
 
 function createWindow() {
   const preloadPath = path.join(__dirname, "preload.cjs");
@@ -103,6 +144,10 @@ ipcMain.handle("rfx:syscall", async (_evt, call) => {
   return dispatchCmdJson(call);
 });
 
+ipcMain.handle("rfx:sendOsc", async (_evt, packet) => {
+  return sendOscPacket(packet);
+});
+
 app.whenReady().then(async () => {
   await bootIpc();
   createWindow();
@@ -122,4 +167,7 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   if (watchers) watchers.stop();
+  try {
+    oscPort?.close();
+  } catch { }
 });

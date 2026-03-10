@@ -1,9 +1,17 @@
-// src/core/rfx/Store.js
 import { create } from "zustand";
 import { normalize } from "./Normalize";
 import { buildOptimistic } from "./Optimistic";
 import { reconcilePending } from "./Reconcile";
 import { uid, nowMs } from "./Util";
+import {
+  createContinuousOverlayState,
+  beginContinuousOverlay,
+  updateContinuousOverlay,
+  markContinuousOverlayPending,
+  clearContinuousOverlay,
+  makeTrackVolumeKey,
+  makeTrackPanKey,
+} from "./Continuous";
 
 const MAX_EVENT_LOG = 300;
 
@@ -66,7 +74,7 @@ function mergeOverlay(base, patch) {
   if (!patch) return base;
   return {
     track: { ...(base.track || {}), ...(patch.track || {}) },
-    bus: { ...(base.bus || {}), ...(patch.bus || {}) }, // ✅ ADD
+    bus: { ...(base.bus || {}), ...(patch.bus || {}) },
     fx: { ...(base.fx || {}), ...(patch.fx || {}) },
     fxOrderByTrackGuid: {
       ...(base.fxOrderByTrackGuid || {}),
@@ -104,6 +112,49 @@ function coerceMetersFrame(frame) {
     activeBusId: f.activeBusId || null,
     metersById: metersById && typeof metersById === "object" ? metersById : null,
   };
+}
+
+function isTrackVolumePreviewCall(call) {
+  return call?.name === "setTrackVolume" && call?.phase === "preview";
+}
+
+function isTrackVolumeCommitCall(call) {
+  return call?.name === "setTrackVolume" && call?.phase === "commit";
+}
+
+function isTrackPanPreviewCall(call) {
+  return call?.name === "setTrackPan" && call?.phase === "preview";
+}
+
+function isTrackPanCommitCall(call) {
+  return call?.name === "setTrackPan" && call?.phase === "commit";
+}
+
+function stripContinuousFields(call) {
+  const next = { ...(call || {}) };
+  delete next.phase;
+  delete next.gestureId;
+  return next;
+}
+
+async function trySendTrackVolumeOsc(transport, trackGuid, value) {
+  if (transport?.osc?.sendTrackVolume) {
+    return transport.osc.sendTrackVolume(trackGuid, value);
+  }
+  if (transport?.sendTrackVolumeOsc) {
+    return transport.sendTrackVolumeOsc(trackGuid, value);
+  }
+  throw new Error("transport osc.sendTrackVolume not wired");
+}
+
+async function trySendTrackPanOsc(transport, trackGuid, value) {
+  if (transport?.osc?.sendTrackPan) {
+    return transport.osc.sendTrackPan(trackGuid, value);
+  }
+  if (transport?.sendTrackPanOsc) {
+    return transport.sendTrackPanOsc(trackGuid, value);
+  }
+  throw new Error("transport osc.sendTrackPan not wired");
 }
 
 export const useRfxStore = create((set, get) => ({
@@ -149,21 +200,22 @@ export const useRfxStore = create((set, get) => ({
   // ✅ Telemetry: meters (fast path, not seq-bearing)
   // ---------------------------
   meters: {
-    byId: {}, // { FX_1: {l,r}, FX_2: {l,r} }
+    byId: {},
     lastAtMs: 0,
     activeBusId: null,
   },
 
+  // ---------------------------
   // Perf-ish / VM compatibility
+  // ---------------------------
   perf: {
     buses: null,
     activeBusId: null,
     busModesById: null,
-    metersById: null, // we will source this from meters.byId
-    knobValuesByBusId: {},   // { [busId]: { [knobId]: value01 } }
-    knobMapByBusId: {},      // { [busId]: { [knobId]: KnobTarget } }
+    metersById: null,
+    knobValuesByBusId: {},
+    knobMapByBusId: {},
     mappingArmed: null,
-
   },
 
   // ---------------------------
@@ -189,10 +241,36 @@ export const useRfxStore = create((set, get) => ({
       fxParamsByGuid: {},
     },
     lastError: null,
-
-    // bounded timeline
     eventLog: [],
   },
+
+  // ---------------------------
+  // Continuous overlay state
+  // ---------------------------
+  continuous: createContinuousOverlayState(),
+
+  // ---------------------------
+  // Continuous overlay actions
+  // ---------------------------
+  beginContinuous: (key, gestureId, value01) =>
+    set((s) => ({
+      continuous: beginContinuousOverlay(s.continuous, key, gestureId, value01),
+    })),
+
+  updateContinuous: (key, gestureId, value01) =>
+    set((s) => ({
+      continuous: updateContinuousOverlay(s.continuous, key, gestureId, value01),
+    })),
+
+  commitContinuous: (key, gestureId, value01) =>
+    set((s) => ({
+      continuous: markContinuousOverlayPending(s.continuous, key, gestureId, value01),
+    })),
+
+  clearContinuous: (key, gestureId) =>
+    set((s) => ({
+      continuous: clearContinuousOverlay(s.continuous, key, gestureId),
+    })),
 
   // ============================================================
   // Event log API
@@ -201,7 +279,7 @@ export const useRfxStore = create((set, get) => ({
     const entry = {
       t: nowMs(),
       kind: String(kind || "event"),
-      meta: meta ?? null, // ✅ allows { opId, seq, ... }
+      meta: meta ?? null,
       data: data ?? null,
     };
     set((s) => ({
@@ -275,7 +353,6 @@ export const useRfxStore = create((set, get) => ({
     const nextSeq = Number(norm?.snapshot?.seq || 0);
     const seqChanged = nextSeq !== prevSeq && nextSeq !== 0;
 
-    // ✅ Gate snapshot logging to seq changes (prevents meter spam)
     if (seqChanged) {
       get().logEvent(
         "snapshot:received",
@@ -292,18 +369,14 @@ export const useRfxStore = create((set, get) => ({
     const prevPendingById = prev.ops.pendingById;
     const prevPendingOrder = prev.ops.pendingOrder;
 
-    const { nextOps } = reconcilePending(prev, norm);
+    const { nextOps, nextContinuous } = reconcilePending(prev, norm);
 
-    // selection -> guid
     let selectedGuid = prev.session.selectedTrackGuid;
     const idx = Number(norm?.selection?.selectedTrackIndex ?? -1);
     if (idx >= 0) selectedGuid = norm.entities.trackOrder[idx] || null;
     else selectedGuid = null;
 
-    // active track fallback logic
     let activeGuid = prev.session.activeTrackGuid;
-
-    // NOTE: perf.activeBusId is not a trackGuid. Keep activeTrackGuid separate.
 
     if (activeGuid && !norm.entities.tracksByGuid[activeGuid]) activeGuid = null;
     if (!activeGuid) activeGuid = selectedGuid || norm.entities.trackOrder[0] || null;
@@ -316,7 +389,7 @@ export const useRfxStore = create((set, get) => ({
 
     set((s) => ({
       snapshot: {
-        ...norm.snapshot,     // ✅ preserves trackMix + busMix (and any other future fields)
+        ...norm.snapshot,
         receivedAtMs,
       },
       reaper: norm.reaper,
@@ -324,27 +397,24 @@ export const useRfxStore = create((set, get) => ({
       transportState: norm.transportState,
       selection: norm.selection,
       entities: norm.entities,
+      continuous: nextContinuous ?? s.continuous,
 
-      // ✅ perf.metersById comes from telemetry slice (s.meters.byId),
-      // not from snapshot normalization. Snapshot is truth state.
       perf: norm.perf
         ? {
-          // truth-ish perf fields
-          buses: norm.perf.buses,
-          activeBusId: norm.perf.activeBusId,
-          busModesById:
-            norm.perf.busModesById ?? norm.perf.routingModesById ?? null,
-          metersById: s.meters.byId || s.perf.metersById || null,
+            buses: norm.perf.buses,
+            activeBusId: norm.perf.activeBusId,
+            busModesById:
+              norm.perf.busModesById ?? norm.perf.routingModesById ?? null,
+            metersById: s.meters.byId || s.perf.metersById || null,
 
-          // preserve RFX-owned perf fields
-          knobValuesByBusId: s.perf.knobValuesByBusId || {},
-          knobMapByBusId: s.perf.knobMapByBusId || {},
-          mappingArmed: s.perf.mappingArmed ?? null,
-        }
+            knobValuesByBusId: s.perf.knobValuesByBusId || {},
+            knobMapByBusId: s.perf.knobMapByBusId || {},
+            mappingArmed: s.perf.mappingArmed ?? null,
+          }
         : {
-          ...s.perf,
-          metersById: s.meters.byId || s.perf.metersById || null,
-        },
+            ...s.perf,
+            metersById: s.meters.byId || s.perf.metersById || null,
+          },
 
       session: {
         ...s.session,
@@ -354,12 +424,10 @@ export const useRfxStore = create((set, get) => ({
 
       ops: {
         ...nextOps,
-        // ✅ preserve from this set() state (prevents eventLog rewind)
         eventLog: s.ops.eventLog,
       },
     }));
 
-    // ✅ Only log transitions when seq changed AND something transitioned
     if (seqChanged) {
       const changed =
         transitions.acked.length +
@@ -380,7 +448,6 @@ export const useRfxStore = create((set, get) => ({
           { seq: nextSeq }
         );
 
-        // Per-op transition events
         for (const row of transitions.acked) {
           get().logEvent(
             "op:acked",
@@ -429,24 +496,173 @@ export const useRfxStore = create((set, get) => ({
   dispatchIntent: async (intent) => {
     const transport = get().transport;
 
-    // intent received (no opId yet)
     get().logEvent("intent:received", intent, null);
 
     const call = coerceToTransportCall(intent);
     if (!call || !call.name) return;
 
+    // ------------------------------------------------------------
+    // Continuous preview path: setTrackVolume
+    // ------------------------------------------------------------
+    if (isTrackVolumePreviewCall(call)) {
+      const trackGuid = String(call.trackGuid || "");
+      const gestureId = String(call.gestureId || "");
+      const value = Number(call.value);
+
+      if (!trackGuid || !Number.isFinite(value)) return;
+
+      const key = makeTrackVolumeKey(trackGuid);
+      get().updateContinuous(key, gestureId, value);
+
+      try {
+        await trySendTrackVolumeOsc(transport, trackGuid, value);
+        get().logEvent(
+          "osc:trackVolume:preview",
+          { trackGuid, value, gestureId },
+          null
+        );
+      } catch (err) {
+        get().logEvent(
+          "osc:error",
+          {
+            kind: "setTrackVolume",
+            phase: "preview",
+            trackGuid,
+            value,
+            error: String(err?.message || err),
+          },
+          null
+        );
+      }
+
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // Continuous preview path: setTrackPan
+    // ------------------------------------------------------------
+    if (isTrackPanPreviewCall(call)) {
+      const trackGuid = String(call.trackGuid || "");
+      const gestureId = String(call.gestureId || "");
+      const value = Number(call.value);
+
+      if (!trackGuid || !Number.isFinite(value)) return;
+
+      const key = makeTrackPanKey(trackGuid);
+      get().updateContinuous(key, gestureId, value);
+
+      try {
+        await trySendTrackPanOsc(transport, trackGuid, value);
+        get().logEvent(
+          "osc:trackPan:preview",
+          { trackGuid, value, gestureId },
+          null
+        );
+      } catch (err) {
+        get().logEvent(
+          "osc:error",
+          {
+            kind: "setTrackPan",
+            phase: "preview",
+            trackGuid,
+            value,
+            error: String(err?.message || err),
+          },
+          null
+        );
+      }
+
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // Continuous commit path setup: setTrackVolume / setTrackPan
+    // ------------------------------------------------------------
+    const isTrackVolCommit = isTrackVolumeCommitCall(call);
+    const isTrackPanCommit = isTrackPanCommitCall(call);
+    let syscallCall = call;
+
+    if (isTrackVolCommit) {
+      const trackGuid = String(call.trackGuid || "");
+      const gestureId = String(call.gestureId || "");
+      const value = Number(call.value);
+
+      if (!trackGuid || !Number.isFinite(value)) return;
+
+      const key = makeTrackVolumeKey(trackGuid);
+      get().commitContinuous(key, gestureId, value);
+
+      try {
+        await trySendTrackVolumeOsc(transport, trackGuid, value);
+        get().logEvent(
+          "osc:trackVolume:commit",
+          { trackGuid, value, gestureId },
+          null
+        );
+      } catch (err) {
+        get().logEvent(
+          "osc:error",
+          {
+            kind: "setTrackVolume",
+            phase: "commit",
+            trackGuid,
+            value,
+            error: String(err?.message || err),
+          },
+          null
+        );
+      }
+
+      syscallCall = stripContinuousFields(call);
+    }
+
+    if (isTrackPanCommit) {
+      const trackGuid = String(call.trackGuid || "");
+      const gestureId = String(call.gestureId || "");
+      const value = Number(call.value);
+
+      if (!trackGuid || !Number.isFinite(value)) return;
+
+      const key = makeTrackPanKey(trackGuid);
+      get().commitContinuous(key, gestureId, value);
+
+      try {
+        await trySendTrackPanOsc(transport, trackGuid, value);
+        get().logEvent(
+          "osc:trackPan:commit",
+          { trackGuid, value, gestureId },
+          null
+        );
+      } catch (err) {
+        get().logEvent(
+          "osc:error",
+          {
+            kind: "setTrackPan",
+            phase: "commit",
+            trackGuid,
+            value,
+            error: String(err?.message || err),
+          },
+          null
+        );
+      }
+
+      syscallCall = stripContinuousFields(call);
+    }
+
     const opId = uid("op");
     const createdAtMs = nowMs();
 
-    // Optimistic build should never crash the pipeline
+    // Continuous controls already have their own overlay layer.
     let optimistic = null;
-    try {
-      optimistic = buildOptimistic(get(), intent);
-    } catch {
-      optimistic = null;
+    if (!isTrackVolCommit && !isTrackPanCommit) {
+      try {
+        optimistic = buildOptimistic(get(), intent);
+      } catch {
+        optimistic = null;
+      }
     }
 
-    // register pending + apply overlay
     set((s) => ({
       ops: {
         ...s.ops,
@@ -454,9 +670,9 @@ export const useRfxStore = create((set, get) => ({
           ...s.ops.pendingById,
           [opId]: {
             id: opId,
-            kind: call.name,
+            kind: syscallCall.name,
             status: "queued",
-            intent,
+            intent: syscallCall,
             optimistic,
             createdAtMs,
           },
@@ -468,7 +684,7 @@ export const useRfxStore = create((set, get) => ({
 
     get().logEvent(
       "intent:optimistic_applied",
-      { kind: call.name, optimistic: optimistic || null },
+      { kind: syscallCall.name, optimistic: optimistic || null },
       { opId }
     );
 
@@ -476,7 +692,11 @@ export const useRfxStore = create((set, get) => ({
       set((s) => ({
         ops: {
           ...s.ops,
-          lastError: { opId, message: "No transport wired into RFX store", atMs: nowMs() },
+          lastError: {
+            opId,
+            message: "No transport wired into RFX store",
+            atMs: nowMs(),
+          },
           pendingById: {
             ...s.ops.pendingById,
             [opId]: {
@@ -488,7 +708,11 @@ export const useRfxStore = create((set, get) => ({
         },
       }));
 
-      get().logEvent("syscall:error", { kind: call.name, error: "no transport" }, { opId });
+      get().logEvent(
+        "syscall:error",
+        { kind: syscallCall.name, error: "no transport" },
+        { opId }
+      );
       return;
     }
 
@@ -498,16 +722,19 @@ export const useRfxStore = create((set, get) => ({
           ...s.ops,
           pendingById: {
             ...s.ops.pendingById,
-            [opId]: { ...s.ops.pendingById[opId], status: "sent", sentAtMs: nowMs() },
+            [opId]: {
+              ...s.ops.pendingById[opId],
+              status: "sent",
+              sentAtMs: nowMs(),
+            },
           },
         },
       }));
 
-      get().logEvent("syscall:sent", { call }, { opId });
+      get().logEvent("syscall:sent", { call: syscallCall }, { opId });
 
-      const res = await transport.syscall(call);
+      const res = await transport.syscall(syscallCall);
 
-      // ✅ Contract-enforced: syscall returns {ok:true} or {ok:false,error}
       if (res && res.ok === false) {
         const msg = String(res.error || "syscall failed");
         set((s) => ({
@@ -516,16 +743,20 @@ export const useRfxStore = create((set, get) => ({
             lastError: { opId, message: msg, atMs: nowMs() },
             pendingById: {
               ...s.ops.pendingById,
-              [opId]: { ...s.ops.pendingById[opId], status: "failed", error: msg },
+              [opId]: {
+                ...s.ops.pendingById[opId],
+                status: "failed",
+                error: msg,
+              },
             },
           },
         }));
 
-        get().logEvent("syscall:error", { kind: call.name, error: msg }, { opId });
+        get().logEvent("syscall:error", { kind: syscallCall.name, error: msg }, { opId });
         return;
       }
 
-      // ack happens only once snapshots come in and reconcilePending verifies fields
+      // ack happens when snapshots come in and reconcilePending verifies fields
     } catch (err) {
       const msg = String(err?.message || err);
 
@@ -535,19 +766,22 @@ export const useRfxStore = create((set, get) => ({
           lastError: { opId, message: msg, atMs: nowMs() },
           pendingById: {
             ...s.ops.pendingById,
-            [opId]: { ...s.ops.pendingById[opId], status: "failed", error: msg },
+            [opId]: {
+              ...s.ops.pendingById[opId],
+              status: "failed",
+              error: msg,
+            },
           },
         },
       }));
 
-      get().logEvent("syscall:error", { kind: call.name, error: msg }, { opId });
+      get().logEvent("syscall:error", { kind: syscallCall.name, error: msg }, { opId });
     }
   },
 
   // ------------------------------------------------------------
   // ✅ Perf knob mapping helpers (RFX-owned, no transport)
   // ------------------------------------------------------------
-
   armKnobMapping: (payload) => {
     const p = payload || {};
     const busId = String(p.busId || "");
@@ -558,7 +792,6 @@ export const useRfxStore = create((set, get) => ({
 
     if (!busId || !fxGuid || !trackGuid || !Number.isFinite(paramIdx)) return;
 
-    // Only log "armed" once a knob is chosen (your requirement)
     if (knobId) {
       const m = knobId.match(/_k(\d+)$/);
       const knobIndex = m ? Number(m[1]) : null;
@@ -626,7 +859,6 @@ export const useRfxStore = create((set, get) => ({
       trackName: p.trackName || undefined,
     };
 
-    // ✅ Single clean log
     get().logEvent("knobmap:committed", {
       ...target,
       knobIndex,
@@ -705,7 +937,12 @@ export const useRfxStore = create((set, get) => ({
 
     if (!toRemove.length) return;
 
-    get().logEvent("knobmap:param_unmapped", { busId: b, fxGuid: fx, paramIdx: idx, knobs: toRemove });
+    get().logEvent("knobmap:param_unmapped", {
+      busId: b,
+      fxGuid: fx,
+      paramIdx: idx,
+      knobs: toRemove,
+    });
 
     set((s) => {
       const nextBusMap = { ...((s.perf.knobMapByBusId || {})[b] || {}) };
@@ -722,11 +959,10 @@ export const useRfxStore = create((set, get) => ({
       };
     });
   },
+
   // ------------------------------------------------------------
   // Session helpers
   // ------------------------------------------------------------
-
-
   setActiveTrackGuid: (trackGuid) =>
     set((s) => ({ session: { ...s.session, activeTrackGuid: trackGuid } })),
 

@@ -49,6 +49,7 @@ export function useScrubValue({
     pointerId: null,
     startX: 0,
     startValue: 0,
+    currentValue: 0,
     moved: false,
   });
 
@@ -58,15 +59,18 @@ export function useScrubValue({
     (e) => {
       if (e.pointerType === "mouse" && e.button !== 0) return;
 
+      const start = Number(value) || 0;
+
       stRef.current.pointerId = e.pointerId;
       stRef.current.startX = e.clientX;
-      stRef.current.startValue = Number(value) || 0;
+      stRef.current.startValue = start;
+      stRef.current.currentValue = start;
       stRef.current.moved = false;
 
       if (capturePointer && e.currentTarget?.setPointerCapture) {
         try {
           e.currentTarget.setPointerCapture(e.pointerId);
-        } catch {}
+        } catch { }
       }
     },
     [capturePointer, value]
@@ -95,13 +99,14 @@ export function useScrubValue({
         accel?.enabled === false
           ? d
           : accelCurve(d, {
-              exponent: accel?.exponent ?? 1.6,
-              accel: accel?.accel ?? 0.015,
-            });
+            exponent: accel?.exponent ?? 1.6,
+            accel: accel?.accel ?? 0.015,
+          });
 
       const delta = sign * effPx * sensitivity;
       const next = clamp(st.startValue + delta, min, max);
 
+      st.currentValue = next;
       onChange?.(next, { dx: rawDx, event: e });
     },
     [accel, max, min, onChange, preventDefaultOnDrag, sensitivity, threshold2]
@@ -113,10 +118,14 @@ export function useScrubValue({
       if (st.pointerId == null) return;
 
       const didMove = st.moved;
+      const finalValue = st.currentValue;
+
       st.pointerId = null;
       st.moved = false;
 
-      if (didMove) onEnd?.({ event: e });
+      if (didMove) {
+        onEnd?.({ event: e, value: finalValue });
+      }
     },
     [onEnd]
   );

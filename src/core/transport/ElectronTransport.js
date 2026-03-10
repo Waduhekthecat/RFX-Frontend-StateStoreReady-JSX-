@@ -2,6 +2,51 @@ function isAvailable() {
   return typeof window !== "undefined" && !!window.rfx?.transport;
 }
 
+function clamp01(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return 0;
+  if (v < 0) return 0;
+  if (v > 1) return 1;
+  return v;
+}
+
+function getTrackNumberFromRfxGuid(trackGuid) {
+  const guid = String(trackGuid || "").trim();
+
+  if (guid === "INPUT") return 1;
+
+  // Matches:
+  // FX_1
+  // FX_1A
+  // FX_1B
+  // FX_1C
+  const m = guid.match(/^FX_(\d+)([ABC])?$/i);
+  if (!m) return null;
+
+  const busNum = Number(m[1]);
+  const lane = String(m[2] || "").toUpperCase();
+
+  if (!Number.isFinite(busNum) || busNum < 1) return null;
+
+  // Layout:
+  // 1 = INPUT
+  // 2 = FX_1
+  // 3 = FX_1A
+  // 4 = FX_1B
+  // 5 = FX_1C
+  // 6 = FX_2
+  // 7 = FX_2A
+  // ...
+  const busBase = 2 + (busNum - 1) * 4;
+
+  if (!lane) return busBase;
+  if (lane === "A") return busBase + 1;
+  if (lane === "B") return busBase + 2;
+  if (lane === "C") return busBase + 3;
+
+  return null;
+}
+
 export function createElectronTransport() {
   if (!isAvailable()) return null;
 
@@ -104,6 +149,114 @@ export function createElectronTransport() {
 
     async syscall(call) {
       return api.syscall(call);
+    },
+
+    osc: {
+      async sendTrackVolume(trackGuid, value) {
+        const guid = String(trackGuid || "");
+        const vol = clamp01(value);
+
+        if (!guid || !Number.isFinite(vol)) {
+          throw new Error("sendTrackVolume: invalid trackGuid/value");
+        }
+
+        const trackNumber = getTrackNumberFromRfxGuid(guid);
+        if (!Number.isFinite(trackNumber)) {
+          throw new Error(
+            `sendTrackVolume: could not resolve track number for guid ${guid}`
+          );
+        }
+
+        const address = `/track/${trackNumber}/volume`;
+
+        if (typeof api.sendOsc === "function") {
+          return api.sendOsc({
+            address,
+            args: [vol],
+          });
+        }
+
+        if (typeof api.oscSend === "function") {
+          return api.oscSend(address, [vol]);
+        }
+
+        if (typeof api.sendTrackVolumeOsc === "function") {
+          return api.sendTrackVolumeOsc(trackNumber, vol);
+        }
+
+        throw new Error(
+          "OSC bridge not wired: expected api.sendOsc / api.oscSend / api.sendTrackVolumeOsc"
+        );
+      },
+
+      async sendTrackPan(trackGuid, value) {
+        const guid = String(trackGuid || "");
+        const pan01 = clamp01(value);
+
+        if (!guid || !Number.isFinite(pan01)) {
+          throw new Error("sendTrackPan: invalid trackGuid/value");
+        }
+
+        const trackNumber = getTrackNumberFromRfxGuid(guid);
+        if (!Number.isFinite(trackNumber)) {
+          throw new Error(
+            `sendTrackPan: could not resolve track number for guid ${guid}`
+          );
+        }
+
+        const address = `/track/${trackNumber}/pan`;
+
+        // REAPER pan OSC expects:
+        // 0.0 = L100
+        // 0.5 = C
+        // 1.0 = R100
+        if (typeof api.sendOsc === "function") {
+          return api.sendOsc({
+            address,
+            args: [pan01],
+          });
+        }
+
+        if (typeof api.oscSend === "function") {
+          return api.oscSend(address, [pan01]);
+        }
+
+        if (typeof api.sendTrackPanOsc === "function") {
+          return api.sendTrackPanOsc(trackNumber, pan01);
+        }
+
+        throw new Error(
+          "OSC bridge not wired: expected api.sendOsc / api.oscSend / api.sendTrackPanOsc"
+        );
+      },
+
+      async sendBusVolume(busId, value) {
+        const id = String(busId || "");
+        const vol = clamp01(value);
+
+        if (!id || !Number.isFinite(vol)) {
+          throw new Error("sendBusVolume: invalid busId/value");
+        }
+
+        if (typeof api.sendOsc === "function") {
+          return api.sendOsc({
+            address: "/rfx/bus/vol",
+            args: [id, vol],
+          });
+        }
+
+        if (typeof api.oscSend === "function") {
+          return api.oscSend("/rfx/bus/vol", [id, vol]);
+        }
+
+        if (typeof api.sendBusVolumeOsc === "function") {
+          return api.sendBusVolumeOsc(id, vol);
+        }
+
+        throw new Error(
+          "OSC bridge not wired: expected api.sendOsc / api.oscSend / api.sendBusVolumeOsc"
+        );
+      },
     },
 
     destroy() {

@@ -1,5 +1,7 @@
 // src/core/rfx/Reconcile.js
 
+import { settleContinuousOverlays } from "./Continuous";
+
 const OP_TIMEOUT_MS = 8000;
 const EPS = 1e-4;
 
@@ -52,6 +54,8 @@ export function reconcilePending(prevState, norm) {
     fxOrderByTrackGuid: {},
     fxParamsByGuid: {},
   };
+
+  const prevContinuous = prevState?.continuous || { byKey: {} };
 
   const collapsed = computeCollapsedSet(pendingOrder, pendingById);
 
@@ -157,6 +161,11 @@ export function reconcilePending(prevState, norm) {
     nextPendingOrder.push(opId);
   }
 
+  const nextContinuous = settleContinuousOverlays(
+    prevContinuous,
+    (key) => resolveContinuousTruthValue01(key, norm)
+  );
+
   return {
     nextOps: {
       pendingById: nextPendingById,
@@ -164,6 +173,7 @@ export function reconcilePending(prevState, norm) {
       overlay,
       lastError: prevState?.ops?.lastError || null,
     },
+    nextContinuous,
   };
 }
 
@@ -342,7 +352,6 @@ function opVerifySnapshot(op, norm) {
         return v(false, `no fx found on track ${tg}`);
       }
 
-      // If we have previous snapshot context, use count increase.
       const prevOrder =
         op?.baseSnapshot?.entities?.fxOrderByTrackGuid?.[tg] ||
         op?.prevSnapshot?.entities?.fxOrderByTrackGuid?.[tg] ||
@@ -353,8 +362,6 @@ function opVerifySnapshot(op, norm) {
         return v(true, REASONS.OK);
       }
 
-      // Fallback: if no previous snapshot is stored, accept presence of any fx on track
-      // only when the intent was to add and the command succeeded recently.
       if (actual.length > 0) {
         return v(true, REASONS.OK);
       }
@@ -369,7 +376,6 @@ function opVerifySnapshot(op, norm) {
       const fx = fxByGuid[fxGuid];
       if (fx) return v(false, "removeFx not reflected in truth (fx still present)");
 
-      // If it's gone from fxByGuid, that's enough for now.
       return v(true, REASONS.OK);
     }
 
@@ -406,7 +412,6 @@ function opVerifySnapshot(op, norm) {
         : v(false, "fx order mismatch");
     }
 
-    // ✅ setRoutingMode verified by lane recArm (real) or perf map (mock)
     case "setRoutingMode": {
       const { busId, mode } = intent || {};
       if (!busId) return v(false, "missing busId");
@@ -415,8 +420,8 @@ function opVerifySnapshot(op, norm) {
       if (isMockVm(norm)) {
         const got = normalizeMode(
           norm?.perf?.busModesById?.[busId] ??
-          norm?.perf?.routingModesById?.[busId] ??
-          "linear"
+            norm?.perf?.routingModesById?.[busId] ??
+            "linear"
         );
         return got === want
           ? v(true, REASONS.OK)
@@ -455,9 +460,6 @@ function opVerifySnapshot(op, norm) {
       return v(true, REASONS.OK);
     }
 
-    // ✅ selectActiveBus verified by:
-    //  1) session/perf activeBusId equals requested busId (mock)
-    //  2) session.activeBusId equals requested busId AND INPUT sends match armed lanes (real)
     case "selectActiveBus": {
       const { busId } = intent || {};
       if (!busId) return v(false, "missing busId");
@@ -486,13 +488,11 @@ function opVerifySnapshot(op, norm) {
       return setEqual(actualDestGuids, armedLaneGuids)
         ? v(true, REASONS.OK)
         : v(
-          false,
-          `INPUT sends mismatch: want ${armedLaneGuids.length} got ${actualDestGuids.length}`
-        );
+            false,
+            `INPUT sends mismatch: want ${armedLaneGuids.length} got ${actualDestGuids.length}`
+          );
     }
 
-    // FX Params fetch (lazy)
-    // for electron: verify entities.fxParamsByGuidp[fxGuid] exists
     case "getPluginParams": {
       const { fxGuid } = intent || {};
       if (!fxGuid) return v(false, "missing fxGuid");
@@ -512,7 +512,6 @@ function opVerifySnapshot(op, norm) {
       if (!Number.isFinite(paramIdx)) return v(false, "missing paramIdx");
       if (!Number.isFinite(want)) return v(false, "missing value01");
 
-      // MOCK path: params live in snapshot/entities.fxParamsByGuid[fxGuid].params[*].value01
       const hit =
         norm?.entities?.fxParamsByGuid?.[fxGuid] ??
         norm?.snapshot?.fxParamsByGuid?.[fxGuid];
@@ -529,12 +528,51 @@ function opVerifySnapshot(op, norm) {
         ? v(true, REASONS.OK)
         : v(false, `param mismatch: want ≈${want} got ${got}`);
     }
+
     case "syncView":
       return v(true, "syncView (no state assertion)");
 
     default:
       return v(false, `no verifier implemented for op kind="${kind}"`);
   }
+}
+
+function resolveContinuousTruthValue01(key, norm) {
+  const k = String(key || "");
+
+  if (k.startsWith("trackVol:")) {
+    const trackGuid = k.slice("trackVol:".length);
+
+    if (isMockVm(norm)) {
+      const tg = canonicalTrackGuid(trackGuid);
+      const got = Number(norm?.snapshot?.trackMix?.[tg]?.vol);
+      return Number.isFinite(got) ? got : NaN;
+    }
+
+    const got = Number(norm?.entities?.tracksByGuid?.[trackGuid]?.vol);
+    return Number.isFinite(got) ? got : NaN;
+  }
+
+  if (k.startsWith("trackPan:")) {
+    const trackGuid = k.slice("trackPan:".length);
+
+    if (isMockVm(norm)) {
+      const tg = canonicalTrackGuid(trackGuid);
+      const got = Number(norm?.snapshot?.trackMix?.[tg]?.pan);
+      return Number.isFinite(got) ? got : NaN;
+    }
+
+    const got = Number(norm?.entities?.tracksByGuid?.[trackGuid]?.pan);
+    return Number.isFinite(got) ? got : NaN;
+  }
+
+  if (k.startsWith("busVol:")) {
+    const busId = k.slice("busVol:".length);
+    const got = Number(norm?.snapshot?.busMix?.[busId]?.vol);
+    return Number.isFinite(got) ? got : NaN;
+  }
+
+  return NaN;
 }
 
 function armedLaneGuidsForBus(tracksByGuid, busId) {
@@ -655,6 +693,7 @@ function clearOverlayForOp(overlay, op) {
     fxOrderByTrackGuid: { ...(overlay.fxOrderByTrackGuid || {}) },
     fxParamsByGuid: { ...(overlay.fxParamsByGuid || {}) },
   };
+
   if (optimistic.bus) {
     for (const id of Object.keys(optimistic.bus)) delete next.bus[id];
   }
@@ -675,15 +714,14 @@ function clearOverlayForOp(overlay, op) {
       const base = next.fxParamsByGuid[fxGuid];
       if (!base) continue;
 
-      // delete only the indices touched
       const copy = { ...(base || {}) };
       for (const idx of Object.keys(byIdx)) delete copy[idx];
 
-      // cleanup empty object
       if (Object.keys(copy).length === 0) delete next.fxParamsByGuid[fxGuid];
       else next.fxParamsByGuid[fxGuid] = copy;
     }
   }
+
   return next;
 }
 

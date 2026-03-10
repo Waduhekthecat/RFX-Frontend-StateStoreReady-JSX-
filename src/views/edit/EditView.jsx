@@ -323,7 +323,7 @@ function TrackDetailCard({ trackGuid, intent }) {
     e.dataTransfer.effectAllowed = "move";
     try {
       e.dataTransfer.setData("text/plain", fxId);
-    } catch {}
+    } catch { }
   }
 
   function onDragOver(e) {
@@ -355,12 +355,12 @@ function TrackDetailCard({ trackGuid, intent }) {
       <div className="p-4 flex-1 min-h-0">
         <div className="grid grid-cols-12 gap-3 h-full min-h-0">
           <Inset className="col-span-7 h-full min-h-0 p-3 flex flex-col gap-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="flex items-center gap-3 flex-shrink-0">
                 <div className="text-[14px] font-semibold tracking-wide text-white">{tg}</div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center flex-1 min-w-0">
                 <TrackMixControls trackGuid={tg} />
               </div>
             </div>

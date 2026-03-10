@@ -24,27 +24,32 @@ export function Slider({
   step = 0.01,
   onChange,
   valueText,
-  widthClass = "w-[160px]",
+  widthClass = "",
+  valueWidthClass = "min-w-[50px]",
 }) {
   const safeValue = clamp(value, min, max);
 
   return (
-    <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-white/10 bg-white/5">
-      <div className="text-[11px] text-white/60 font-semibold tracking-wide w-10">
+    <div className="w-full flex items-center gap-2 px-3 py-2 rounded-xl border border-white/10 bg-white/5">
+      <div className="text-[11px] text-white/60 font-semibold tracking-wide w-7 flex-shrink-0">
         {label}
       </div>
 
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={safeValue}
-        onChange={(e) => onChange?.(Number(e.target.value))}
-        className={widthClass}
-      />
+      <div className="flex-1 min-w-0">
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={safeValue}
+          onChange={(e) => onChange?.(Number(e.target.value))}
+          className={`block w-full min-w-0 ${widthClass}`}
+        />
+      </div>
 
-      <div className="text-[11px] text-white/45 tabular-nums w-14 text-right">
+      <div
+        className={`text-[11px] text-white/45 tabular-nums whitespace-nowrap text-right flex-shrink-0 ${valueWidthClass}`}
+      >
         {valueText ?? String(safeValue)}
       </div>
     </div>
