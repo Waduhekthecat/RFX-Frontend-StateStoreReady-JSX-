@@ -32,17 +32,8 @@ This separation allows the interface to remain responsive while synchronizing wi
 
 RFX uses a layered control architecture connecting the UI to the DSP host.
 
-```
-React UI
-   ↓
-RFX State Engine
-   ↓
-Electron Transport Layer
-   ↓
-OSC Messaging
-   ↓
-Reaper DSP Engine
-```
+![RFX System Architecture](./public/rfx-architecture.png)
+*Edit view used for managing plugin chains and parameter controls.*
 
 Each layer is responsible for a specific part of the control pipeline.
 
