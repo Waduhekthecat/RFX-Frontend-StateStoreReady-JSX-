@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("rfx", {
     sendOsc: (packet) => ipcRenderer.invoke("rfx:sendOsc", packet),
     getSnapshot: () => ipcRenderer.invoke("rfx:getSnapshot"),
     getInstalledFx: () => ipcRenderer.invoke("rfx:getInstalledFx"),
+    getBootState: () => ipcRenderer.invoke("rfx:getBootState"),
 
     onViewModel: (cb) => {
       const handler = (_evt, snap) => cb(snap);
@@ -30,6 +31,18 @@ contextBridge.exposeInMainWorld("rfx", {
       const handler = (_evt, list) => cb(list);
       ipcRenderer.on("rfx:installedFx", handler);
       return () => ipcRenderer.removeListener("rfx:installedFx", handler);
+    },
+
+    onBootState: (cb) => {
+      const handler = (_evt, state) => cb(state);
+      ipcRenderer.on("rfx:bootState", handler);
+      return () => ipcRenderer.removeListener("rfx:bootState", handler);
+    },
+
+    onReaperReady: (cb) => {
+      const handler = (_evt, ready) => cb(!!ready);
+      ipcRenderer.on("rfx:reaperReady", handler);
+      return () => ipcRenderer.removeListener("rfx:reaperReady", handler);
     },
   },
 });

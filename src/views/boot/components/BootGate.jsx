@@ -8,11 +8,58 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function mapBootStateToUi(bootState, ready) {
+  if (ready || bootState === "READY") {
+    return {
+      phase: "operational",
+      message: "Operational.",
+      detail: null,
+    };
+  }
+
+  switch (bootState) {
+    case "STARTING":
+      return {
+        phase: "booting",
+        message: "Initializing console environment…",
+        detail: null,
+      };
+
+    case "IPC_READY":
+      return {
+        phase: "syncing",
+        message: "Syncing view snapshot…",
+        detail: null,
+      };
+
+    case "REAPER_LAUNCHING":
+      return {
+        phase: "waitingForReady",
+        message: "Launching REAPER…",
+        detail: null,
+      };
+
+    case "WAITING_FOR_REAPER":
+      return {
+        phase: "waitingForReady",
+        message: "Waiting for REAPER handshake…",
+        detail: null,
+      };
+
+    default:
+      return {
+        phase: "booting",
+        message: "Initializing…",
+        detail: null,
+      };
+  }
+}
+
 export function BootGate({ children, allowSkip = true, autoStart = true }) {
   const transport = useTransport();
   const intent = useIntent();
 
-  const [uiMode, setUiMode] = React.useState("logo"); // "logo" | "full"
+  const [uiMode, setUiMode] = React.useState("logo");
   const [status, setStatus] = React.useState({
     phase: "idle",
     message: "Initializing…",
@@ -20,50 +67,76 @@ export function BootGate({ children, allowSkip = true, autoStart = true }) {
     seq: null,
   });
 
-  // StrictMode/dev guard: prevent double-runBoot
   const didAutoStartRef = React.useRef(false);
+  const bootRunIdRef = React.useRef(0);
 
   const runBoot = React.useCallback(async () => {
-    setUiMode("logo");
-    setStatus({ phase: "idle", message: "Initializing…", detail: null, seq: null });
+    const runId = ++bootRunIdRef.current;
 
-    const totalMin = sleep(7000);
+    setUiMode("logo");
+    setStatus({
+      phase: "idle",
+      message: "Initializing…",
+      detail: null,
+      seq: null,
+    });
 
     try {
-      await sleep(2000);
+      await sleep(800);
+
+      if (bootRunIdRef.current !== runId) return;
       setUiMode("full");
 
-      setStatus({ phase: "booting", message: "Starting…", detail: null, seq: null });
-
-      let seq = null;
-
       setStatus({
-        phase: "waitingForReady",
-        message: "Waiting for REAPER handshake…",
+        phase: "booting",
+        message: "Starting…",
         detail: null,
         seq: null,
       });
 
-      if (typeof transport.boot === "function") {
+      if (typeof transport?.boot === "function") {
         const res = await transport.boot();
-        if (!res || res.ok === false) throw new Error(res?.error || "Boot failed.");
-        seq = res.seq ?? null;
-      } else {
-        await sleep(600);
-        seq = 1;
+        if (!res || res.ok === false) {
+          throw new Error(res?.error || "Boot failed.");
+        }
       }
 
-      setStatus({ phase: "syncing", message: "Syncing view snapshot…", detail: null, seq });
+      let seeded = { bootState: "STARTING", reaperReady: false };
+      if (typeof transport?.getBootState === "function") {
+        const snap = await transport.getBootState();
+        seeded = {
+          bootState: snap?.bootState || "STARTING",
+          reaperReady: !!snap?.reaperReady,
+        };
+      }
 
-      await intent({ name: "syncView" });
+      if (bootRunIdRef.current !== runId) return;
 
-      await totalMin;
+      const nextUi = mapBootStateToUi(seeded.bootState, seeded.reaperReady);
 
-      setStatus({ phase: "operational", message: "Operational.", detail: null, seq });
+      setStatus({
+        phase: nextUi.phase,
+        message: nextUi.message,
+        detail: nextUi.detail,
+        seq: null,
+      });
+
+      if (seeded.reaperReady || seeded.bootState === "READY") {
+        try {
+          await intent({ name: "syncView" });
+        } catch {}
+        if (bootRunIdRef.current !== runId) return;
+        setStatus({
+          phase: "operational",
+          message: "Operational.",
+          detail: null,
+          seq: null,
+        });
+      }
     } catch (e) {
-      setUiMode("full");
-      await totalMin;
+      if (bootRunIdRef.current !== runId) return;
 
+      setUiMode("full");
       setStatus({
         phase: "error",
         message: "Boot failed.",
@@ -80,10 +153,64 @@ export function BootGate({ children, allowSkip = true, autoStart = true }) {
     runBoot();
   }, [autoStart, runBoot]);
 
-  const retry = React.useCallback(() => runBoot(), [runBoot]);
+  React.useEffect(() => {
+    if (!transport) return;
+
+    const offBootState =
+      typeof transport.onBootState === "function"
+        ? transport.onBootState((nextBootState) => {
+            setStatus((prev) => {
+              if (prev.phase === "error" || prev.phase === "operational") {
+                return prev;
+              }
+
+              const nextUi = mapBootStateToUi(nextBootState, false);
+              return {
+                ...prev,
+                phase: nextUi.phase,
+                message: nextUi.message,
+                detail: nextUi.detail,
+              };
+            });
+          })
+        : null;
+
+    const offReaperReady =
+      typeof transport.onReaperReady === "function"
+        ? transport.onReaperReady(async (ready) => {
+            if (!ready) return;
+
+            try {
+              await intent({ name: "syncView" });
+            } catch {}
+
+            setStatus({
+              phase: "operational",
+              message: "Operational.",
+              detail: null,
+              seq: null,
+            });
+          })
+        : null;
+
+    return () => {
+      try {
+        offBootState?.();
+      } catch {}
+
+      try {
+        offReaperReady?.();
+      } catch {}
+    };
+  }, [transport, intent]);
+
+  const retry = React.useCallback(() => {
+    runBoot();
+  }, [runBoot]);
 
   const skip = React.useCallback(() => {
     if (!allowSkip) return;
+
     setUiMode("full");
     setStatus({
       phase: "operational",

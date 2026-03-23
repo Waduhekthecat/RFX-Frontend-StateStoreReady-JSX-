@@ -1,6 +1,8 @@
 const path = require("path");
+const { spawn } = require("child_process");
 const { app, BrowserWindow, ipcMain } = require("electron");
 const osc = require("osc");
+
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 
 const { dispatchCmdJson } = require("./ipc/dispatcher.cjs");
@@ -14,15 +16,56 @@ let liveVm = createFallbackVm();
 let liveInstalledFx = [];
 let watchers = null;
 let oscPort = null;
+let reaperProcess = null;
+let readinessPollTimer = null;
+
+const BootState = Object.freeze({
+  STARTING: "STARTING",
+  IPC_READY: "IPC_READY",
+  REAPER_LAUNCHING: "REAPER_LAUNCHING",
+  WAITING_FOR_REAPER: "WAITING_FOR_REAPER",
+  READY: "READY",
+});
+
+let bootState = BootState.STARTING;
+let reaperReady = false;
+let reaperLaunchAttempted = false;
+
+function safeSend(channel, payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload);
+  }
+}
+
+function setBootState(nextState) {
+  if (!nextState || bootState === nextState) return;
+  bootState = nextState;
+  console.log("[RFX] bootState =", bootState);
+  safeSend("rfx:bootState", bootState);
+}
+
+function setReaperReady(nextReady) {
+  const value = !!nextReady;
+  if (reaperReady === value) return;
+
+  reaperReady = value;
+  console.log("[RFX] reaperReady =", reaperReady);
+  safeSend("rfx:reaperReady", reaperReady);
+
+  if (reaperReady) {
+    setBootState(BootState.READY);
+    stopReadinessPolling();
+  }
+}
 
 function ensureOscPort() {
   if (oscPort) return oscPort;
 
   oscPort = new osc.UDPPort({
     localAddress: "127.0.0.1",
-    localPort: 0, // ephemeral sender port
+    localPort: 0,
     remoteAddress: "127.0.0.1",
-    remotePort: 8000, // <-- change this to whatever REAPER-side OSC receiver listens on
+    remotePort: 8000,
     metadata: true,
   });
 
@@ -55,6 +98,103 @@ async function sendOscPacket(packet) {
   return { ok: true };
 }
 
+function getDefaultReaperPath() {
+  if (process.platform === "darwin") {
+    return "/Applications/REAPER.app/Contents/MacOS/REAPER";
+  }
+  if (process.platform === "win32") {
+    return "C:\\Program Files\\REAPER (x64)\\reaper.exe";
+  }
+  return "reaper";
+}
+
+function buildReaperLaunchConfig() {
+  const exePath = process.env.REAPER_PATH || getDefaultReaperPath();
+  const args = [];
+
+  if (process.env.REAPER_PROJECT) {
+    args.push(process.env.REAPER_PROJECT);
+  }
+
+  return { exePath, args };
+}
+
+function hasUsableVmIdentity(vm) {
+  if (!vm || typeof vm !== "object") return false;
+  if (Array.isArray(vm.tracks) && vm.tracks.length > 0) return true;
+  if (Array.isArray(vm.fxChains) && vm.fxChains.length > 0) return true;
+  if (Array.isArray(vm.plugins) && vm.plugins.length > 0) return true;
+  if (typeof vm.projectName === "string" && vm.projectName.trim()) return true;
+  return false;
+}
+
+function evaluateReaperReadiness(vm) {
+  if (reaperReady) return;
+  if (hasUsableVmIdentity(vm)) {
+    setReaperReady(true);
+  }
+}
+
+function stopReadinessPolling() {
+  if (readinessPollTimer) {
+    clearInterval(readinessPollTimer);
+    readinessPollTimer = null;
+  }
+}
+
+function startReadinessPolling() {
+  stopReadinessPolling();
+
+  readinessPollTimer = setInterval(async () => {
+    if (reaperReady) {
+      stopReadinessPolling();
+      return;
+    }
+
+    try {
+      const paths = getIpcPaths();
+      const vm = await readJsonSafe(paths.vm, null);
+      if (vm) {
+        liveVm = vm;
+        safeSend("rfx:vm", liveVm);
+        evaluateReaperReadiness(vm);
+      }
+    } catch (err) {
+      console.warn("[RFX] readiness poll failed:", err);
+    }
+  }, 1000);
+}
+
+function launchReaper() {
+  if (reaperLaunchAttempted) return;
+  reaperLaunchAttempted = true;
+
+  setBootState(BootState.REAPER_LAUNCHING);
+
+  const { exePath, args } = buildReaperLaunchConfig();
+
+  try {
+    console.log("[RFX] launching REAPER:", exePath, args);
+
+    reaperProcess = spawn(exePath, args, {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: false,
+    });
+
+    reaperProcess.on("error", (err) => {
+      console.error("[RFX] Failed to launch REAPER:", err);
+    });
+
+    reaperProcess.unref();
+  } catch (err) {
+    console.error("[RFX] Exception while launching REAPER:", err);
+  }
+
+  setBootState(BootState.WAITING_FOR_REAPER);
+  startReadinessPolling();
+}
+
 function createWindow() {
   const preloadPath = path.join(__dirname, "preload.cjs");
   console.log("PRELOAD PATH =", preloadPath);
@@ -71,6 +211,13 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: false,
     },
+  });
+
+  mainWindow.webContents.once("did-finish-load", () => {
+    safeSend("rfx:bootState", bootState);
+    safeSend("rfx:reaperReady", reaperReady);
+    safeSend("rfx:vm", liveVm || createFallbackVm());
+    safeSend("rfx:installedFx", Array.isArray(liveInstalledFx) ? liveInstalledFx : []);
   });
 
   if (DEV_SERVER_URL) {
@@ -94,42 +241,47 @@ async function bootIpc() {
   const vm = await readJsonSafe(paths.vm, null);
   if (vm) {
     liveVm = vm;
+    evaluateReaperReadiness(vm);
   }
 
   liveInstalledFx = await readInstalledFxSnapshot();
 
   watchers = createIpcWatchers({
     onVm(nextVm) {
+      console.log("[RFX] onVm received");
       liveVm = nextVm;
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("rfx:vm", nextVm);
-      }
+      evaluateReaperReadiness(nextVm);
+      safeSend("rfx:vm", nextVm);
     },
 
     onCmdResult(nextRes) {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("rfx:cmdResult", nextRes);
-      }
+      safeSend("rfx:cmdResult", nextRes);
     },
 
     onInstalledFx(nextInstalledFx) {
       liveInstalledFx = Array.isArray(nextInstalledFx) ? nextInstalledFx : [];
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("rfx:installedFx", liveInstalledFx);
-      }
+      safeSend("rfx:installedFx", liveInstalledFx);
     },
   });
 
   await watchers.start();
-  await watchers.refreshVm().catch(() => { });
-  await watchers.refreshCmdResult().catch(() => { });
+  await watchers.refreshVm().catch(() => {});
+  await watchers.refreshCmdResult().catch(() => {});
 
-  // prime installed plugins after watchers start
   liveInstalledFx = await readInstalledFxSnapshot().catch(() => []);
+  setBootState(BootState.IPC_READY);
+
+  if (!reaperReady) {
+    setBootState(BootState.WAITING_FOR_REAPER);
+  }
 }
 
 ipcMain.handle("rfx:boot", async () => {
-  return { ok: true };
+  return {
+    ok: true,
+    bootState,
+    reaperReady,
+  };
 });
 
 ipcMain.handle("rfx:getSnapshot", async () => {
@@ -138,6 +290,14 @@ ipcMain.handle("rfx:getSnapshot", async () => {
 
 ipcMain.handle("rfx:getInstalledFx", async () => {
   return Array.isArray(liveInstalledFx) ? liveInstalledFx : [];
+});
+
+ipcMain.handle("rfx:getBootState", async () => {
+  return {
+    ok: true,
+    bootState,
+    reaperReady,
+  };
 });
 
 ipcMain.handle("rfx:syscall", async (_evt, call) => {
@@ -149,8 +309,10 @@ ipcMain.handle("rfx:sendOsc", async (_evt, packet) => {
 });
 
 app.whenReady().then(async () => {
+  setBootState(BootState.STARTING);
   await bootIpc();
   createWindow();
+  launchReaper();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -166,8 +328,13 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
-  if (watchers) watchers.stop();
+  stopReadinessPolling();
+
+  try {
+    watchers?.stop();
+  } catch {}
+
   try {
     oscPort?.close();
-  } catch { }
+  } catch {}
 });

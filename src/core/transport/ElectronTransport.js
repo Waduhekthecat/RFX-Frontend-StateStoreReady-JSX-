@@ -47,6 +47,10 @@ function getTrackNumberFromRfxGuid(trackGuid) {
   return null;
 }
 
+function noopOff() {
+  return () => {};
+}
+
 export function createElectronTransport() {
   if (!isAvailable()) return null;
 
@@ -54,31 +58,53 @@ export function createElectronTransport() {
 
   let vm = null;
   let installedFx = [];
+  let bootState = "STARTING";
+  let reaperReady = false;
 
   const subs = new Set();
   const meterSubs = new Set();
   const installedFxSubs = new Set();
   const cmdResultSubs = new Set();
+  const bootStateSubs = new Set();
+  const reaperReadySubs = new Set();
 
   const offVm =
     typeof api.onViewModel === "function"
       ? api.onViewModel((next) => {
           vm = next;
-          subs.forEach((cb) => cb(vm));
+          subs.forEach((cb) => {
+            try {
+              cb(vm);
+            } catch (err) {
+              console.warn("[ElectronTransport] onViewModel subscriber failed:", err);
+            }
+          });
         })
       : null;
 
   const offCmdResult =
     typeof api.onCmdResult === "function"
       ? api.onCmdResult((result) => {
-          cmdResultSubs.forEach((cb) => cb(result));
+          cmdResultSubs.forEach((cb) => {
+            try {
+              cb(result);
+            } catch (err) {
+              console.warn("[ElectronTransport] onCmdResult subscriber failed:", err);
+            }
+          });
         })
       : null;
 
   const offMeters =
     typeof api.onMeters === "function"
       ? api.onMeters((frame) => {
-          meterSubs.forEach((cb) => cb(frame));
+          meterSubs.forEach((cb) => {
+            try {
+              cb(frame);
+            } catch (err) {
+              console.warn("[ElectronTransport] onMeters subscriber failed:", err);
+            }
+          });
         })
       : null;
 
@@ -86,19 +112,90 @@ export function createElectronTransport() {
     typeof api.onInstalledFx === "function"
       ? api.onInstalledFx((next) => {
           installedFx = Array.isArray(next) ? next : [];
-          installedFxSubs.forEach((cb) => cb(installedFx));
+          installedFxSubs.forEach((cb) => {
+            try {
+              cb(installedFx);
+            } catch (err) {
+              console.warn("[ElectronTransport] onInstalledFx subscriber failed:", err);
+            }
+          });
+        })
+      : null;
+
+  const offBootState =
+    typeof api.onBootState === "function"
+      ? api.onBootState((nextState) => {
+          bootState = String(nextState || "STARTING");
+          bootStateSubs.forEach((cb) => {
+            try {
+              cb(bootState);
+            } catch (err) {
+              console.warn("[ElectronTransport] onBootState subscriber failed:", err);
+            }
+          });
+        })
+      : null;
+
+  const offReaperReady =
+    typeof api.onReaperReady === "function"
+      ? api.onReaperReady((nextReady) => {
+          reaperReady = !!nextReady;
+          reaperReadySubs.forEach((cb) => {
+            try {
+              cb(reaperReady);
+            } catch (err) {
+              console.warn("[ElectronTransport] onReaperReady subscriber failed:", err);
+            }
+          });
         })
       : null;
 
   const transport = {
     async boot() {
-      const res = await api.boot();
+      const res =
+        typeof api.boot === "function"
+          ? await api.boot()
+          : { ok: true, bootState, reaperReady };
 
       try {
-        const snap = await api.getSnapshot();
-        if (snap) {
-          vm = snap;
-          subs.forEach((cb) => cb(vm));
+        if (typeof api.getBootState === "function") {
+          const nextBoot = await api.getBootState();
+          bootState = String(nextBoot?.bootState || bootState || "STARTING");
+          reaperReady = !!nextBoot?.reaperReady;
+
+          bootStateSubs.forEach((cb) => {
+            try {
+              cb(bootState);
+            } catch (err) {
+              console.warn("[ElectronTransport] bootState subscriber failed:", err);
+            }
+          });
+
+          reaperReadySubs.forEach((cb) => {
+            try {
+              cb(reaperReady);
+            } catch (err) {
+              console.warn("[ElectronTransport] reaperReady subscriber failed:", err);
+            }
+          });
+        }
+      } catch {
+        // ignore
+      }
+
+      try {
+        if (typeof api.getSnapshot === "function") {
+          const snap = await api.getSnapshot();
+          if (snap) {
+            vm = snap;
+            subs.forEach((cb) => {
+              try {
+                cb(vm);
+              } catch (err) {
+                console.warn("[ElectronTransport] boot snapshot subscriber failed:", err);
+              }
+            });
+          }
         }
       } catch {
         // ignore
@@ -108,21 +205,78 @@ export function createElectronTransport() {
         if (typeof api.getInstalledFx === "function") {
           const list = await api.getInstalledFx();
           installedFx = Array.isArray(list) ? list : [];
-          installedFxSubs.forEach((cb) => cb(installedFx));
+          installedFxSubs.forEach((cb) => {
+            try {
+              cb(installedFx);
+            } catch (err) {
+              console.warn("[ElectronTransport] boot installedFx subscriber failed:", err);
+            }
+          });
         }
       } catch {
         // ignore
       }
 
-      return res;
+      return {
+        ...(res || {}),
+        ok: res?.ok !== false,
+        bootState,
+        reaperReady,
+      };
     },
 
-    getSnapshot() {
+    async getSnapshot() {
+      if (typeof api.getSnapshot === "function") {
+        try {
+          const snap = await api.getSnapshot();
+          if (snap) {
+            vm = snap;
+          }
+        } catch {
+          // ignore
+        }
+      }
       return vm;
     },
 
-    getInstalledFx() {
+    async getInstalledFx() {
+      if (typeof api.getInstalledFx === "function") {
+        try {
+          const list = await api.getInstalledFx();
+          installedFx = Array.isArray(list) ? list : [];
+        } catch {
+          // ignore
+        }
+      }
       return installedFx;
+    },
+
+    async getBootState() {
+      if (typeof api.getBootState === "function") {
+        try {
+          const nextBoot = await api.getBootState();
+          bootState = String(nextBoot?.bootState || bootState || "STARTING");
+          reaperReady = !!nextBoot?.reaperReady;
+          return {
+            ok: true,
+            bootState,
+            reaperReady,
+          };
+        } catch (err) {
+          return {
+            ok: false,
+            error: String(err?.message || err),
+            bootState,
+            reaperReady,
+          };
+        }
+      }
+
+      return {
+        ok: true,
+        bootState,
+        reaperReady,
+      };
     },
 
     subscribe(cb) {
@@ -147,8 +301,48 @@ export function createElectronTransport() {
       return () => meterSubs.delete(cb);
     },
 
+    onViewModel(cb) {
+      return transport.subscribe(cb);
+    },
+
+    onCmdResult(cb) {
+      return transport.subscribeCmdResult(cb);
+    },
+
+    onInstalledFx(cb) {
+      return transport.subscribeInstalledFx(cb);
+    },
+
+    onMeters(cb) {
+      return transport.subscribeMeters(cb);
+    },
+
+    onBootState(cb) {
+      bootStateSubs.add(cb);
+      cb(bootState);
+      return () => bootStateSubs.delete(cb);
+    },
+
+    onReaperReady(cb) {
+      reaperReadySubs.add(cb);
+      cb(reaperReady);
+      return () => reaperReadySubs.delete(cb);
+    },
+
     async syscall(call) {
       return api.syscall(call);
+    },
+
+    async sendOsc(packet) {
+      if (typeof api.sendOsc === "function") {
+        return api.sendOsc(packet);
+      }
+
+      if (typeof api.oscSend === "function") {
+        return api.oscSend(packet?.address, packet?.args || []);
+      }
+
+      throw new Error("OSC bridge not wired: expected api.sendOsc or api.oscSend");
     },
 
     osc: {
@@ -206,10 +400,6 @@ export function createElectronTransport() {
 
         const address = `/track/${trackNumber}/pan`;
 
-        // REAPER pan OSC expects:
-        // 0.0 = L100
-        // 0.5 = C
-        // 1.0 = R100
         if (typeof api.sendOsc === "function") {
           return api.sendOsc({
             address,
@@ -283,7 +473,6 @@ export function createElectronTransport() {
           );
         }
 
-        // REAPER OSC path is 1-based for fx and param slots
         const fxSlot1 = fxSlot0 + 1;
         const paramSlot1 = paramSlot0 + 1;
         const address = `/track/${trackNumber}/fx/${fxSlot1}/fxparam/${paramSlot1}/value`;
@@ -320,12 +509,16 @@ export function createElectronTransport() {
         offCmdResult?.();
         offMeters?.();
         offInstalledFx?.();
+        offBootState?.();
+        offReaperReady?.();
       } catch {}
 
       subs.clear();
       cmdResultSubs.clear();
       meterSubs.clear();
       installedFxSubs.clear();
+      bootStateSubs.clear();
+      reaperReadySubs.clear();
     },
   };
 

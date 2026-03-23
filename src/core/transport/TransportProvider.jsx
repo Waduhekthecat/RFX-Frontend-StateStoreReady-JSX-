@@ -5,15 +5,55 @@ import { wrapTransportWithContract } from "./ContractEnforcer";
 
 const TransportCtx = React.createContext(null);
 
-export function TransportProvider({ children, transport: providedTransport = null }) {
+function noopOff() {
+  return () => {};
+}
+
+function createFallbackTransport() {
+  return {
+    boot: async () => ({ ok: true, bootState: "READY", reaperReady: true }),
+    syscall: async () => ({ ok: false, error: "Transport unavailable" }),
+    sendOsc: async () => ({ ok: false, error: "Transport unavailable" }),
+    getSnapshot: async () => null,
+    getInstalledFx: async () => [],
+    getBootState: async () => ({
+      ok: true,
+      bootState: "READY",
+      reaperReady: true,
+    }),
+    onViewModel: () => noopOff(),
+    onMeters: () => noopOff(),
+    onCmdResult: () => noopOff(),
+    onInstalledFx: () => noopOff(),
+    onBootState: () => noopOff(),
+    onReaperReady: () => noopOff(),
+  };
+}
+
+export function TransportProvider({
+  children,
+  transport: providedTransport = null,
+}) {
   const transport = React.useMemo(() => {
-    const electron = !providedTransport ? createElectronTransport() : null;
-    const raw = providedTransport || electron;
+    let electron = null;
+    let raw = null;
+
+    try {
+      electron = !providedTransport ? createElectronTransport() : null;
+      raw = providedTransport || electron || createFallbackTransport();
+    } catch (err) {
+      console.warn("[TransportProvider] Failed to create transport:", err);
+      raw = createFallbackTransport();
+    }
 
     return wrapTransportWithContract(raw, {
       name:
         raw?.constructor?.name ||
-        (providedTransport ? "ProvidedTransport" : electron ? "ElectronTransport" : "MockTransport"),
+        (providedTransport
+          ? "ProvidedTransport"
+          : electron
+          ? "ElectronTransport"
+          : "FallbackTransport"),
       warn: true,
     });
   }, [providedTransport]);
