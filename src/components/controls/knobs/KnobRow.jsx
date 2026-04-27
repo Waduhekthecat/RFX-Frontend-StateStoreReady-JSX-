@@ -4,16 +4,62 @@ import { Knob } from "./Knob";
 import { styles } from "./_styles";
 import { useRfxStore } from "../../../core/rfx/Store";
 
+const EMPTY_OBJ = Object.freeze({});
+
+function readFxParam01(sources, fxGuid, paramIdx, fallback01 = 0.5) {
+  const overlayByGuid = sources?.overlayByGuid || EMPTY_OBJ;
+  const snapshotByGuid = sources?.snapshotByGuid || EMPTY_OBJ;
+  const entitiesByGuid = sources?.entitiesByGuid || EMPTY_OBJ;
+
+  const patch = overlayByGuid?.[fxGuid]?.[paramIdx];
+  if (patch && Number.isFinite(Number(patch.value01))) {
+    return clamp01(patch.value01);
+  }
+
+  const manifest = entitiesByGuid?.[fxGuid] ?? snapshotByGuid?.[fxGuid];
+  const params = manifest?.params;
+  if (Array.isArray(params)) {
+    for (let i = 0; i < params.length; i += 1) {
+      const x = params[i];
+      if (Number(x?.idx) === Number(paramIdx) && Number.isFinite(Number(x?.value01))) {
+        return clamp01(x.value01);
+      }
+    }
+  }
+
+  return clamp01(fallback01);
+}
+
 export function KnobRow({ knobs, busId, mappingArmed }) {
   const dispatchIntent = useRfxStore((s) => s.dispatchIntent);
   const setKnobValueLocal = useRfxStore((s) => s.setKnobValueLocal);
   const commitKnobMapping = useRfxStore((s) => s.commitKnobMapping);
 
   const knobMapByBusId = useRfxStore((s) => s.perf?.knobMapByBusId || {});
+  
+  const fxParamsOverlayByGuid = useRfxStore((s) => s.ops?.overlay?.fxParamsByGuid || EMPTY_OBJ);
+  const fxParamsByGuidEntities = useRfxStore((s) => s.entities?.fxParamsByGuid || EMPTY_OBJ);
+  const fxParamsByGuidSnapshot = useRfxStore((s) => s.snapshot?.fxParamsByGuid || EMPTY_OBJ);
+  
   const busKey = String(busId || "NONE");
-  const mapForBus = knobMapByBusId?.[busKey] || {};
+  // const mapForBus = knobMapByBusId?.[busKey] || {};
+
+  const mapForBus = React.useMemo(
+    () => knobMapByBusId?.[busKey] || EMPTY_OBJ,
+    [knobMapByBusId, busKey]
+  );
+
+  const fxParamSources = React.useMemo(
+    () => ({
+      overlayByGuid: fxParamsOverlayByGuid,
+      snapshotByGuid: fxParamsByGuidSnapshot,
+      entitiesByGuid: fxParamsByGuidEntities,
+    }),
+    [fxParamsOverlayByGuid, fxParamsByGuidSnapshot, fxParamsByGuidEntities]
+  );
 
   const visibleKnobs = React.useMemo(() => (knobs || []).slice(0, 7), [knobs]);
+  
   const getTargetsForKnob = React.useCallback(
     (knobId) => {
       const raw = mapForBus?.[knobId];
@@ -26,6 +72,8 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
   const [localValues, setLocalValues] = React.useState(() => ({}));
   const localValuesRef = React.useRef({});
   const activeLocalKnobsRef = React.useRef(new Set());
+
+  const groupedGestureStateRef = React.useRef({});
 
   // keep ref synced so commit can always read latest dragged value
   React.useEffect(() => {
@@ -63,6 +111,12 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
     (knobId, next01) => {
       const v01 = clamp01(next01);
 
+      const prevKnob = clamp01(
+        Number.isFinite(localValuesRef.current?.[knobId])
+          ? localValuesRef.current[knobId]
+          : v01
+      );
+
       activeLocalKnobsRef.current.add(knobId);
 
       // immediate local render for knob sprite
@@ -78,8 +132,14 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
       // const target = mapForBus?.[knobId];
       // if (target?.fxGuid && Number.isFinite(Number(target?.paramIdx))) {
       const targets = getTargetsForKnob(knobId);
-      for (const target of targets) {
-        if (!target?.fxGuid || !Number.isFinite(Number(target?.paramIdx))) continue;
+      if (!targets.length) return;
+
+      if (targets.length === 1) {
+        const target = targets[0];
+        if (!target?.fxGuid || !Number.isFinite(Number(target?.paramIdx))) return;
+
+      // for (const target of targets) {
+      //   if (!target?.fxGuid || !Number.isFinite(Number(target?.paramIdx))) continue;
         dispatchIntent({
           name: "setParamValue",
           phase: "preview",
@@ -89,10 +149,64 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
           paramIdx: Number(target.paramIdx),
           value01: v01,
         });
+        return;
       }
+
+      const requestedDelta = v01 - prevKnob;
+      if (!Number.isFinite(requestedDelta) || Math.abs(requestedDelta) < 0.000001) return;
+
+      const existing = groupedGestureStateRef.current?.[knobId] || {};
+      const valuesByTargetKey = { ...(existing.valuesByTargetKey || {}) };
+
+      const normalizedTargets = [];
+      for (const target of targets) {
+        if (!target?.fxGuid || !Number.isFinite(Number(target?.paramIdx))) continue;
+        const fxGuid = String(target.fxGuid);
+        const paramIdx = Number(target.paramIdx);
+        const targetKey = `${String(target.trackGuid || "")}|${fxGuid}|${paramIdx}`;
+
+        if (!Number.isFinite(valuesByTargetKey[targetKey])) {
+          valuesByTargetKey[targetKey] = readFxParam01(
+            fxParamSources,
+            fxGuid,
+            paramIdx,
+            v01
+          );
+        }
+
+        normalizedTargets.push({ ...target, fxGuid, paramIdx, targetKey });
+      }
+
+      if (!normalizedTargets.length) return;
+
+      const currentValues = normalizedTargets.map((target) =>
+        clamp01(valuesByTargetKey[target.targetKey])
+      );
+      const minCurrent = Math.min(...currentValues);
+      const maxCurrent = Math.max(...currentValues);
+
+      const minDelta = -minCurrent;
+      const maxDelta = 1 - maxCurrent;
+      const appliedDelta = Math.max(minDelta, Math.min(maxDelta, requestedDelta));
+      if (Math.abs(appliedDelta) < 0.000001) return;
+
+      for (const target of normalizedTargets) {
+        const nextValue = clamp01(valuesByTargetKey[target.targetKey] + appliedDelta);
+        valuesByTargetKey[target.targetKey] = nextValue;
+        dispatchIntent({
+          name: "setParamValue",
+          phase: "preview",
+          gestureId: `knob:${busKey}:${knobId}`,
+          trackGuid: target.trackGuid,
+          fxGuid: target.fxGuid,
+          paramIdx: target.paramIdx,
+          value01: nextValue,
+        });
+      }
+       groupedGestureStateRef.current[knobId] = { valuesByTargetKey };
     },
     // [busKey, dispatchIntent, mapForBus, setKnobValueLocal]
-    [busKey, dispatchIntent, getTargetsForKnob, setKnobValueLocal]
+    [busKey, dispatchIntent, getTargetsForKnob, setKnobValueLocal, fxParamSources]
   );
 
   const onKnobCommit = React.useCallback(
@@ -104,18 +218,31 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
       //   const latestValue = clamp01(localValuesRef.current?.[knobId]);
       const latestValue = clamp01(localValuesRef.current?.[knobId]);
       const targets = getTargetsForKnob(knobId);
+      const grouped = groupedGestureStateRef.current?.[knobId] || null;
+
       for (const target of targets) {
         if (!target?.fxGuid || !Number.isFinite(Number(target?.paramIdx))) continue;
+        const fxGuid = String(target.fxGuid);
+        const paramIdx = Number(target.paramIdx);
+        const targetKey = `${String(target.trackGuid || "")}|${fxGuid}|${paramIdx}`;
+
+        const commitValue = Number.isFinite(grouped?.valuesByTargetKey?.[targetKey])
+          ? clamp01(grouped.valuesByTargetKey[targetKey])
+          : latestValue;
         dispatchIntent({
           name: "setParamValue",
           phase: "commit",
           gestureId: `knob:${busKey}:${knobId}`,
           trackGuid: target.trackGuid,
-          fxGuid: String(target.fxGuid),
-          paramIdx: Number(target.paramIdx),
-          value01: latestValue,
+          // fxGuid: String(target.fxGuid),
+          // paramIdx: Number(target.paramIdx),
+          // value01: latestValue,
+          fxGuid,
+          paramIdx,
+          value01: commitValue,
         });
       }
+      delete groupedGestureStateRef.current[knobId];
     },
     // [busKey, dispatchIntent, mapForBus]
     [busKey, dispatchIntent, getTargetsForKnob]
