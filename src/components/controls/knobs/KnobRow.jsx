@@ -36,11 +36,11 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
   const commitKnobMapping = useRfxStore((s) => s.commitKnobMapping);
 
   const knobMapByBusId = useRfxStore((s) => s.perf?.knobMapByBusId || {});
-  
+
   const fxParamsOverlayByGuid = useRfxStore((s) => s.ops?.overlay?.fxParamsByGuid || EMPTY_OBJ);
   const fxParamsByGuidEntities = useRfxStore((s) => s.entities?.fxParamsByGuid || EMPTY_OBJ);
   const fxParamsByGuidSnapshot = useRfxStore((s) => s.snapshot?.fxParamsByGuid || EMPTY_OBJ);
-  
+
   const busKey = String(busId || "NONE");
   // const mapForBus = knobMapByBusId?.[busKey] || {};
 
@@ -59,7 +59,7 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
   );
 
   const visibleKnobs = React.useMemo(() => (knobs || []).slice(0, 7), [knobs]);
-  
+
   const getTargetsForKnob = React.useCallback(
     (knobId) => {
       const raw = mapForBus?.[knobId];
@@ -72,7 +72,6 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
   const [localValues, setLocalValues] = React.useState(() => ({}));
   const localValuesRef = React.useRef({});
   const activeLocalKnobsRef = React.useRef(new Set());
-
   const groupedGestureStateRef = React.useRef({});
 
   // keep ref synced so commit can always read latest dragged value
@@ -128,18 +127,13 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
 
       // persist the knob's own value immediately
       setKnobValueLocal({ busId: busKey, knobId, value01: v01 });
-
-      // const target = mapForBus?.[knobId];
-      // if (target?.fxGuid && Number.isFinite(Number(target?.paramIdx))) {
       const targets = getTargetsForKnob(knobId);
       if (!targets.length) return;
 
       if (targets.length === 1) {
         const target = targets[0];
         if (!target?.fxGuid || !Number.isFinite(Number(target?.paramIdx))) return;
-
-      // for (const target of targets) {
-      //   if (!target?.fxGuid || !Number.isFinite(Number(target?.paramIdx))) continue;
+        const value01 = target?.invert === true ? clamp01(1 - v01) : v01;
         dispatchIntent({
           name: "setParamValue",
           phase: "preview",
@@ -147,7 +141,7 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
           trackGuid: target.trackGuid,
           fxGuid: String(target.fxGuid),
           paramIdx: Number(target.paramIdx),
-          value01: v01,
+          value01,
         });
         return;
       }
@@ -179,19 +173,28 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
 
       if (!normalizedTargets.length) return;
 
-      const currentValues = normalizedTargets.map((target) =>
-        clamp01(valuesByTargetKey[target.targetKey])
-      );
-      const minCurrent = Math.min(...currentValues);
-      const maxCurrent = Math.max(...currentValues);
+      let minDelta = -1;
+      let maxDelta = 1;
 
-      const minDelta = -minCurrent;
-      const maxDelta = 1 - maxCurrent;
+      for (const target of normalizedTargets) {
+        const currentValue = clamp01(valuesByTargetKey[target.targetKey]);
+        if (target?.invert === true) {
+          // next = current - delta must stay in [0,1]
+          minDelta = Math.max(minDelta, currentValue - 1);
+          maxDelta = Math.min(maxDelta, currentValue);
+        } else {
+          // next = current + delta must stay in [0,1]
+          minDelta = Math.max(minDelta, -currentValue);
+          maxDelta = Math.min(maxDelta, 1 - currentValue);
+        }
+      }
+
       const appliedDelta = Math.max(minDelta, Math.min(maxDelta, requestedDelta));
       if (Math.abs(appliedDelta) < 0.000001) return;
 
       for (const target of normalizedTargets) {
-        const nextValue = clamp01(valuesByTargetKey[target.targetKey] + appliedDelta);
+        const signedDelta = target?.invert === true ? -appliedDelta : appliedDelta;
+        const nextValue = clamp01(valuesByTargetKey[target.targetKey] + signedDelta);
         valuesByTargetKey[target.targetKey] = nextValue;
         dispatchIntent({
           name: "setParamValue",
@@ -203,9 +206,9 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
           value01: nextValue,
         });
       }
-       groupedGestureStateRef.current[knobId] = { valuesByTargetKey };
+
+      groupedGestureStateRef.current[knobId] = { valuesByTargetKey };
     },
-    // [busKey, dispatchIntent, mapForBus, setKnobValueLocal]
     [busKey, dispatchIntent, getTargetsForKnob, setKnobValueLocal, fxParamSources]
   );
 
@@ -213,13 +216,10 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
     (knobId) => {
       activeLocalKnobsRef.current.delete(knobId);
 
-      // const target = mapForBus?.[knobId];
-      // if (target?.fxGuid && Number.isFinite(Number(target?.paramIdx))) {
-      //   const latestValue = clamp01(localValuesRef.current?.[knobId]);
-      const latestValue = clamp01(localValuesRef.current?.[knobId]);
       const targets = getTargetsForKnob(knobId);
       const grouped = groupedGestureStateRef.current?.[knobId] || null;
 
+      const latestValue = clamp01(localValuesRef.current?.[knobId]);
       for (const target of targets) {
         if (!target?.fxGuid || !Number.isFinite(Number(target?.paramIdx))) continue;
         const fxGuid = String(target.fxGuid);
@@ -228,15 +228,14 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
 
         const commitValue = Number.isFinite(grouped?.valuesByTargetKey?.[targetKey])
           ? clamp01(grouped.valuesByTargetKey[targetKey])
-          : latestValue;
+          : target?.invert === true
+            ? clamp01(1 - latestValue)
+            : latestValue;
         dispatchIntent({
           name: "setParamValue",
           phase: "commit",
           gestureId: `knob:${busKey}:${knobId}`,
           trackGuid: target.trackGuid,
-          // fxGuid: String(target.fxGuid),
-          // paramIdx: Number(target.paramIdx),
-          // value01: latestValue,
           fxGuid,
           paramIdx,
           value01: commitValue,
@@ -244,7 +243,6 @@ export function KnobRow({ knobs, busId, mappingArmed }) {
       }
       delete groupedGestureStateRef.current[knobId];
     },
-    // [busKey, dispatchIntent, mapForBus]
     [busKey, dispatchIntent, getTargetsForKnob]
   );
 

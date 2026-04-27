@@ -101,6 +101,7 @@ export function PluginView() {
 
   const [mapModalOpen, setMapModalOpen] = React.useState(false);
   const [mapParam, setMapParam] = React.useState(null);
+  const [mapInverse, setMapInverse] = React.useState(false);
 
   const mappedKnobsByParamIdx = React.useMemo(() => {
     const busId = String(activeBusId || "");
@@ -185,6 +186,7 @@ export function PluginView() {
     if (!p) return;
     setMapParam(p);
     setMapModalOpen(true);
+    setMapInverse(false);
   }, []);
 
   const onUnmap = React.useCallback(
@@ -320,9 +322,22 @@ export function PluginView() {
 
                 <button
                   type="button"
+                  onClick={() => setMapInverse((prev) => !prev)}
+                  className={
+                    mapInverse
+                      ? "h-8 px-3 rounded-xl border border-cyan-300/60 bg-cyan-400/20 hover:bg-cyan-400/30 text-[11px] font-semibold text-cyan-100"
+                      : "h-8 px-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-[11px] font-semibold text-white/80"
+                  }
+                >
+                  {mapInverse ? "INVERSE" : "LINEAR"}
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => {
                     setMapModalOpen(false);
                     setMapParam(null);
+                    setMapInverse(false);
                   }}
                   className="h-8 px-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-[11px] font-semibold text-white/80"
                 >
@@ -380,10 +395,12 @@ export function PluginView() {
                               label: String(
                                 mapParam?.uiLabel || mapParam?.name || `Param ${idx}`
                               ),
+                              invert: mapInverse,
                             });
 
                             setMapModalOpen(false);
                             setMapParam(null);
+                            setMapInverse(false);
                           }}
                         >
                           <div className="flex items-center justify-between gap-3">
