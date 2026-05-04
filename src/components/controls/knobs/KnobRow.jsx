@@ -5,6 +5,7 @@ import { styles } from "./_styles";
 import { useRfxStore } from "../../../core/rfx/Store";
 
 const EMPTY_OBJ = Object.freeze({});
+const MAX_NUMBER_MAPPABLE = 3;
 
 function readFxParam01(sources, fxGuid, paramIdx, fallback01 = 0.5) {
   const overlayByGuid = sources?.overlayByGuid || EMPTY_OBJ;
@@ -255,7 +256,7 @@ export function KnobRow({ knobs, busId, mappingArmed, onDropMap, mapDragActive =
   );
 
   const canAcceptMapForKnob = React.useCallback(
-    (knobId) => getTargetsForKnob(knobId).length < 3,
+    (knobId) => getTargetsForKnob(knobId).length < MAX_NUMBER_MAPPABLE,
     [getTargetsForKnob]
   );
 
