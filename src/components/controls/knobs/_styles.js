@@ -70,18 +70,20 @@ export const styles = {
 
   // ---- KnobRow ----
   rowOuter: {
-    height: "100%",
+    height: "auto",
     display: "flex",
     flexDirection: "column",
+    justifyContent: "flex-start",
+    alignItems: "stretch",
   },
 
   rowGrid: (count) => ({
     width: "100%",
-    height: "100%",
+    height: "auto",
     display: "grid",
     gridTemplateColumns: `repeat(${count || 1}, 1fr)`,
     justifyItems: "center",
-    alignItems: "end",
+    alignItems: "start",
     padding: "20px 36px",
     borderRadius: 13,
     background: `

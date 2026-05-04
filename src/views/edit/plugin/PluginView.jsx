@@ -7,6 +7,7 @@ import { useIntent } from "../../../core/useIntent";
 import { useRfxStore } from "../../../core/rfx/Store";
 import { ParamCard } from "./components/ParamCard";
 import { KnobRow } from "../../../components/controls/knobs/KnobRow";
+import { MapCard } from "../../../components/ui/MapCard";
 
 const EMPTY = Object.freeze({});
 const EMPTY_ARR = Object.freeze([]);
@@ -16,8 +17,6 @@ function normalizeKnobTargets(raw) {
   if (!raw) return EMPTY_ARR;
   return Array.isArray(raw) ? raw : [raw];
 }
-
-const MAX_TARGETS_PER_KNOB = 3;
 
 function getPrimaryKnobTarget(raw) {
   const targets = normalizeKnobTargets(raw);
@@ -257,6 +256,58 @@ export function PluginView() {
 
   const bottomBusId = String(activeBusId || "NONE");
 
+
+  const mappedParamsForExpandedView = React.useMemo(() => {
+    const busId = bottomBusId;
+    const maps = knobMapByBusId?.[busId] || EMPTY_OBJ;
+    const out = [];
+
+    for (const rawTarget of Object.values(maps)) {
+      const targets = normalizeKnobTargets(rawTarget);
+      for (const t of targets) {
+        if (!t?.fxGuid || !Number.isFinite(Number(t?.paramIdx))) continue;
+        out.push({
+          trackGuid: t.trackGuid,
+          fxGuid: String(t.fxGuid),
+          paramIdx: Number(t.paramIdx),
+          paramName: String(t.paramName || `Param ${Number(t.paramIdx)}`),
+          pluginName: String(t.fxName || "Plugin"),
+        });
+      }
+    }
+
+    return out.sort((a, b) => a.paramName.localeCompare(b.paramName));
+  }, [bottomBusId, knobMapByBusId]);
+
+  const onMappedParamChange = React.useCallback(
+    (entry, next01) => {
+      if (!entry?.fxGuid || !Number.isFinite(Number(entry?.paramIdx))) return;
+      const value01 = clamp01(next01);
+      const gestureId = `mapCard:${bottomBusId}:${entry.fxGuid}:${entry.paramIdx}`;
+
+      dispatchIntent({
+        name: "setParamValue",
+        phase: "preview",
+        gestureId,
+        trackGuid: entry.trackGuid,
+        fxGuid: entry.fxGuid,
+        paramIdx: entry.paramIdx,
+        value01,
+      });
+
+      dispatchIntent({
+        name: "setParamValue",
+        phase: "commit",
+        gestureId,
+        trackGuid: entry.trackGuid,
+        fxGuid: entry.fxGuid,
+        paramIdx: entry.paramIdx,
+        value01,
+      });
+    },
+    [dispatchIntent, bottomBusId]
+  );
+
   const bottomKnobs = React.useMemo(() => {
     const busId = bottomBusId;
     const values = knobValuesByBusId?.[busId] || EMPTY_OBJ;
@@ -357,7 +408,28 @@ export function PluginView() {
             onDropMap={onDropMapToKnob}
             mapDragActive={!!dragMappingParam}
             onToggleExpand={() => setKnobRowExpanded((prev) => !prev)}
+            expanded={knobRowExpanded}
           />
+
+          {knobRowExpanded ? (
+            <div className="mt-3 px-3 pb-3 overflow-auto flex-1 min-h-0">
+              <div className="flex flex-col gap-3">
+                {mappedParamsForExpandedView.map((entry) => (
+                  <MapCard
+                    key={`${entry.trackGuid || ""}|${entry.fxGuid}|${entry.paramIdx}`}
+                    paramName={entry.paramName}
+                    pluginName={entry.pluginName}
+                    value01={readFxParam01(fxParamSources, entry.fxGuid, entry.paramIdx, 0.5)}
+                    onChange01={(next) => onMappedParamChange(entry, next)}
+                  />
+                ))}
+
+                {!mappedParamsForExpandedView.length ? (
+                  <div className="text-[12px] text-white/45">No mapped parameters on this bus.</div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
         </Panel>
 
         {mapModalOpen ? (

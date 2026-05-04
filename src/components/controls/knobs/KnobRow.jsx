@@ -38,6 +38,7 @@ export function KnobRow({
   onDropMap,
   mapDragActive = false,
   onToggleExpand,
+  expanded = false,
 }) {
   const dispatchIntent = useRfxStore((s) => s.dispatchIntent);
   const setKnobValueLocal = useRfxStore((s) => s.setKnobValueLocal);
@@ -303,8 +304,8 @@ export function KnobRow({
           style={styles.expandToggleBtn}
           title="Toggle expanded knob row"
         >
-          <span style={styles.expandToggleGlyph}>⇕</span>
-          <span style={styles.expandToggleText}>EXPAND</span>
+          <span style={styles.expandToggleGlyph}>{expanded ? "▴" : "▾"}</span>
+          <span style={styles.expandToggleText}>{expanded ? "HIDE" : "MAPS"}</span>
         </button>
       </div>
     </div>
