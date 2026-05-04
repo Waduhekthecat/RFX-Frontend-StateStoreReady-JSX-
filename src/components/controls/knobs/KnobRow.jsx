@@ -8,7 +8,8 @@ import { MapCard } from "../../ui/MapCard";
 
 const EMPTY_OBJ = Object.freeze({});
 const MAX_NUMBER_MAPPABLE = 3;
-
+const COLLAPSED_H = 194;
+const EXPANDED_H = 740;
 function normalizeTargets(raw) {
   if (!raw) return [];
   return Array.isArray(raw) ? raw : [raw];
@@ -383,7 +384,17 @@ export function KnobRow({
     });
   }, [onExpandedChange]);
 
+  const REVEAL_H = EXPANDED_H - COLLAPSED_H;
+  
   return (
+    <div
+    style={{
+      height: expanded ? EXPANDED_H : COLLAPSED_H,
+      transition: "height 400ms ease",
+      overflow: "hidden",
+      minHeight: 0,
+    }}
+  >
     <Panel
       style={{
         height: "100%",
@@ -416,9 +427,10 @@ export function KnobRow({
     >
       <div
         style={{
-          height: "100%",
-          maxHeight: expanded ? 194 : 520,
-          transition: "max-height 400ms ease",
+          height: expanded ? 196 : 520,
+          transition: "height 1000ms ease",
+          overflow: "hidden",
+          flex: "0 0 auto",
         }}
       >
         <div
@@ -461,51 +473,51 @@ export function KnobRow({
 
       <div
         style={{
-          flex: "1 1 auto",
+          flex: "0 0 auto",
           minHeight: 0,
           padding: expanded ? "16px 20px" : "0 20px",
           overflow: "hidden",
-          maxHeight: expanded ? 600 : 0,
+          height: expanded ? 600 : 0,
           opacity: expanded ? 1 : 0,
-          transition: "max-height 400ms ease, opacity 300ms ease, padding 400ms ease",
+          transition: "height 1000ms ease, opacity 1000ms ease, padding 1000ms ease",
         }}
       >
-          <div
-            style={{
-              height: "100%",
-              display: "grid",
-              gridTemplateRows: "repeat(3, minmax(0, 1fr)) 56px",
-              gap: 12,
-            }}
-          >
-            {Array.from({ length: 4 }).map((_, rowIdx) => {
-              const entry = mappedParamsForExpandedView[rowIdx];
+        <div
+          style={{
+            height: "100%",
+            display: "grid",
+            gridTemplateRows: "repeat(3, minmax(0, 1fr)) 56px",
+            gap: 12,
+          }}
+        >
+          {Array.from({ length: 4 }).map((_, rowIdx) => {
+            const entry = mappedParamsForExpandedView[rowIdx];
 
-              return (
-                <div key={`map-row-${rowIdx}`} style={{ minHeight: 0 }}>
-                  {rowIdx < 3 && entry ? (
-                    <MapCard
-                      paramName={entry.paramName}
-                      pluginName={entry.pluginName}
-                      value01={readFxParam01(
-                        fxParamSources,
-                        entry.fxGuid,
-                        entry.paramIdx,
-                        0.5
-                      )}
-                      invert={entry.invert === true}
-                      onChange01={(next) => onMappedParamChange(entry, next)}
-                      onToggleInvert={() => onToggleMappedInvert(entry)}
-                      onUnmap={() => onUnmapMappedParam(entry)}
-                      onRange={() => console.log("range", entry)}
-                      onExtra={() => console.log("extra", entry)}
-                    />
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
+            return (
+              <div key={`map-row-${rowIdx}`} style={{ minHeight: 0 }}>
+                {rowIdx < 3 && entry ? (
+                  <MapCard
+                    paramName={entry.paramName}
+                    pluginName={entry.pluginName}
+                    value01={readFxParam01(
+                      fxParamSources,
+                      entry.fxGuid,
+                      entry.paramIdx,
+                      0.5
+                    )}
+                    invert={entry.invert === true}
+                    onChange01={(next) => onMappedParamChange(entry, next)}
+                    onToggleInvert={() => onToggleMappedInvert(entry)}
+                    onUnmap={() => onUnmapMappedParam(entry)}
+                    onRange={() => console.log("range", entry)}
+                    onExtra={() => console.log("extra", entry)}
+                  />
+                ) : null}
+              </div>
+            );
+          })}
         </div>
-    </Panel>
+      </div>
+    </Panel></div>
   );
 }

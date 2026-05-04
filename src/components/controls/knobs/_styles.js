@@ -78,6 +78,7 @@ export const styles = {
     flexDirection: "column",
     justifyContent: "flex-start",
     alignItems: "stretch",
+    borderRadius: 13,
   },
 
   rowGrid: (count) => ({
