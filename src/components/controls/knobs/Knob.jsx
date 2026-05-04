@@ -172,10 +172,10 @@ export function Knob({
     el.setPointerCapture?.(pointerId);
 
     pendingPressRef.current = { y: e.clientY, v: displayValue, pointerId };
-    setLongPressing(true);
     startRef.current = null;
     longPressFiredRef.current = false;
     clearLongPressTimer();
+    setLongPressing(true);
     longPressTimerRef.current = setTimeout(() => {
       longPressFiredRef.current = true;
       onLongPress?.(id);

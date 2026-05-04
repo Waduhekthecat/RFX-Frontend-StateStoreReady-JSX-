@@ -416,9 +416,9 @@ export function KnobRow({
     >
       <div
         style={{
-          flex: "0 0 auto",
-          height: expanded ? 194 : "100%",
-          transition: "height 400ms ease",
+          height: "100%",
+          maxHeight: expanded ? 194 : 520,
+          transition: "max-height 400ms ease",
         }}
       >
         <div
