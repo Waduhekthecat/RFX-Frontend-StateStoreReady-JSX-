@@ -396,9 +396,12 @@ export function PluginView() {
             right: 0,
             bottom: 0,
             zIndex: knobRowExpanded ? 30 : 10,
-            height: knobRowExpanded ? "100%" : KNOB_STRIP_H,
-            transition: "height 0.4s ease",
+            top: knobRowExpanded ? 0 : "auto",
+            height: knobRowExpanded ? "calc(100% - 74px)" : KNOB_STRIP_H,
+            transition: "height 0.4s ease, top 0.4s ease",
             overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
           }}
         >
           <KnobRow
@@ -412,7 +415,8 @@ export function PluginView() {
           />
 
           {knobRowExpanded ? (
-            <div className="mt-3 px-3 pb-3 overflow-auto flex-1 min-h-0">
+            <div className="px-3 pb-3 overflow-auto flex-1 min-h-0">
+              <div className="h-px bg-white/10 mb-3" />
               <div className="flex flex-col gap-3">
                 {mappedParamsForExpandedView.map((entry) => (
                   <MapCard
