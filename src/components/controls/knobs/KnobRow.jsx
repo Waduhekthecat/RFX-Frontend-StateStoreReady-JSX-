@@ -418,6 +418,7 @@ export function KnobRow({
         style={{
           flex: "0 0 auto",
           height: expanded ? 194 : "100%",
+          transition: "height 400ms ease",
         }}
       >
         <div
@@ -458,15 +459,17 @@ export function KnobRow({
         </div>
       </div>
 
-      {expanded ? (
-        <div
-          style={{
-            flex: "1 1 auto",
-            minHeight: 0,
-            padding: "16px 20px",
-            overflow: "hidden",
-          }}
-        >
+      <div
+        style={{
+          flex: "1 1 auto",
+          minHeight: 0,
+          padding: expanded ? "16px 20px" : "0 20px",
+          overflow: "hidden",
+          maxHeight: expanded ? 600 : 0,
+          opacity: expanded ? 1 : 0,
+          transition: "max-height 400ms ease, opacity 300ms ease, padding 400ms ease",
+        }}
+      >
           <div
             style={{
               height: "100%",
@@ -503,7 +506,6 @@ export function KnobRow({
             })}
           </div>
         </div>
-      ) : null}
     </Panel>
   );
 }

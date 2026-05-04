@@ -50,7 +50,8 @@ export function Knob({
   const longPressTimerRef = React.useRef(0);
   const longPressFiredRef = React.useRef(false);
   const pendingPressRef = React.useRef(null);
-
+  const [longPressing, setLongPressing] = React.useState(false);
+  
   // ✅ display value for smoothing incoming mapped/store updates
   const targetValue = clamp01(value);
   const [displayValue, setDisplayValue] = React.useState(targetValue);
@@ -67,6 +68,7 @@ export function Knob({
     setGlobalDragLock(false);
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+    setLongPressing(false);
   }, []);
 
   // ✅ smooth external updates, but do not fight active drag
@@ -133,6 +135,7 @@ export function Knob({
       clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = 0;
     }
+    setLongPressing(false);
   }
 
   function resetToCenter() {
@@ -169,6 +172,7 @@ export function Knob({
     el.setPointerCapture?.(pointerId);
 
     pendingPressRef.current = { y: e.clientY, v: displayValue, pointerId };
+    setLongPressing(true);
     startRef.current = null;
     longPressFiredRef.current = false;
     clearLongPressTimer();
@@ -248,7 +252,7 @@ export function Knob({
         onPointerCancel={onPointerCancel}
         onLostPointerCapture={onLostPointerCapture}
         className="select-none"
-        style={styles.knobFace({ dragging, mapDragActive, canAcceptMap, mapDragOver })}
+        style={styles.knobFace({ dragging, mapDragActive, canAcceptMap, mapDragOver, longPressing })}
         onDragEnter={(e) => {
           if (!onDropMap || !canAcceptMap) return;
           e.preventDefault();
