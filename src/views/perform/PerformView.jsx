@@ -36,6 +36,7 @@ function readFxParam01(sources, fxGuid, paramIdx, fallback01 = 0.5) {
 
 export function PerformView() {
   const intent = useIntent();
+  const [knobRowExpanded, setKnobRowExpanded] = React.useState(false);
 
   // ✅ IMPORTANT: never return [] / {} inline from selectors
   const buses = useRfxStore((s) => s.perf?.buses ?? EMPTY_ARR);
@@ -117,7 +118,7 @@ export function PerformView() {
   return (
     <div className={styles.Root}>
       <div className={styles.Column}>
-        <div className={styles.Top}>
+        <div className={styles.Top} style={{ paddingBottom: knobRowExpanded ? 0 : KNOB_STRIP_H + 12 }}>
           <BusCardArea
             vm={vm}
             getRoutingMode={(busId) => normalizeMode(vm?.busModes?.[busId] || "linear")}
@@ -127,9 +128,23 @@ export function PerformView() {
 
         <Panel
           className={styles.KnobPanel}
-          style={{ height: KNOB_STRIP_H, flex: `0 0 ${KNOB_STRIP_H}px` }}
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: knobRowExpanded ? 30 : 10,
+            height: knobRowExpanded ? "100%" : KNOB_STRIP_H,
+            transition: "height 0.4s ease",
+            overflow: "hidden",
+          }}
         >
-          <KnobRow knobs={knobs} busId={activeId} mappingArmed={mappingArmed} />
+          <KnobRow
+            knobs={knobs}
+            busId={activeId}
+            mappingArmed={mappingArmed}
+            onToggleExpand={() => setKnobRowExpanded((prev) => !prev)}
+          />
         </Panel>
       </div>
     </div>

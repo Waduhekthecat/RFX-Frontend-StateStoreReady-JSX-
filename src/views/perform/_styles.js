@@ -1,6 +1,6 @@
 export const styles = {
   Root: "h-full w-full p-3 min-h-0",
-  Column: "h-full min-h-0 flex flex-col gap-3",
+  Column: "h-full min-h-0 flex flex-col gap-3 relative",
   Top: "flex-1 min-h-0",
   KnobPanel: "min-h-0",
 
@@ -45,6 +45,4 @@ export const styles = {
   
 };
 
-// Keeping your existing constant in one place (optional)
-// (No behavior change if you keep using your inline constant in PerformView.)
 export const KNOB_STRIP_H = 185;

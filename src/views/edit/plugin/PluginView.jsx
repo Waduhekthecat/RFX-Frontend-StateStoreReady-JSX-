@@ -105,7 +105,8 @@ export function PluginView() {
   const [mapParam, setMapParam] = React.useState(null);
   const [mapInverse, setMapInverse] = React.useState(false);
 
-    const [dragMappingParam, setDragMappingParam] = React.useState(null);
+  const [dragMappingParam, setDragMappingParam] = React.useState(null);
+  const [knobRowExpanded, setKnobRowExpanded] = React.useState(false);
 
   const onMapDragStart = React.useCallback((p) => {
     if (!p) return;
@@ -304,7 +305,10 @@ export function PluginView() {
           </div>
         </Panel>
 
-        <div className="p-0 min-h-0 flex-1 overflow-auto">
+        <div
+          className="p-0 min-h-0 flex-1 overflow-auto"
+          style={{ paddingBottom: knobRowExpanded ? 0 : KNOB_STRIP_H + 12 }}
+        >
           {!manifest ? (
             <div className="text-white/45 text-[12px]">Loading parameters…</div>
           ) : (
@@ -335,7 +339,16 @@ export function PluginView() {
 
         <Panel
           className={styles.KnobPanel}
-          style={{ height: KNOB_STRIP_H, flex: `0 0 ${KNOB_STRIP_H}px` }}
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: knobRowExpanded ? 30 : 10,
+            height: knobRowExpanded ? "100%" : KNOB_STRIP_H,
+            transition: "height 0.4s ease",
+            overflow: "hidden",
+          }}
         >
           <KnobRow
             knobs={bottomKnobs}
@@ -343,6 +356,7 @@ export function PluginView() {
             mappingArmed={mappingArmed}
             onDropMap={onDropMapToKnob}
             mapDragActive={!!dragMappingParam}
+            onToggleExpand={() => setKnobRowExpanded((prev) => !prev)}
           />
         </Panel>
 

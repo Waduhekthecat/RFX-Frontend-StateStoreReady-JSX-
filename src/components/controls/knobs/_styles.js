@@ -106,4 +106,35 @@ export const styles = {
       0 20px 40px rgba(0,0,0,0.6)
     `,
   }),
+
+  expandToggleBtn: {
+    width: "100%",
+    maxWidth: 140,
+    height: 140,
+    borderRadius: 20,
+    alignSelf: "end",
+    border: "1px solid rgba(255,255,255,0.18)",
+    background: "linear-gradient(180deg, rgba(255,255,255,0.08), rgba(0,0,0,0.35))",
+    color: "rgba(255,255,255,0.9)",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    cursor: "pointer",
+    boxShadow: "0 16px 26px rgba(0,0,0,0.75)",
+    transition: "transform 120ms ease, filter 120ms ease",
+  },
+
+  expandToggleGlyph: {
+    fontSize: 28,
+    lineHeight: "28px",
+    fontWeight: 700,
+  },
+
+  expandToggleText: {
+    fontSize: 11,
+    letterSpacing: "0.08em",
+    fontWeight: 700,
+  },
 };

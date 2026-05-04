@@ -31,7 +31,14 @@ function readFxParam01(sources, fxGuid, paramIdx, fallback01 = 0.5) {
   return clamp01(fallback01);
 }
 
-export function KnobRow({ knobs, busId, mappingArmed, onDropMap, mapDragActive = false }) {
+export function KnobRow({
+  knobs,
+  busId,
+  mappingArmed,
+  onDropMap,
+  mapDragActive = false,
+  onToggleExpand,
+}) {
   const dispatchIntent = useRfxStore((s) => s.dispatchIntent);
   const setKnobValueLocal = useRfxStore((s) => s.setKnobValueLocal);
   const commitKnobMapping = useRfxStore((s) => s.commitKnobMapping);
@@ -60,6 +67,7 @@ export function KnobRow({ knobs, busId, mappingArmed, onDropMap, mapDragActive =
   );
 
   const visibleKnobs = React.useMemo(() => (knobs || []).slice(0, 7), [knobs]);
+  const interactiveKnobs = React.useMemo(() => visibleKnobs.slice(0, 6), [visibleKnobs]);
 
   const getTargetsForKnob = React.useCallback(
     (knobId) => {
@@ -260,14 +268,6 @@ export function KnobRow({ knobs, busId, mappingArmed, onDropMap, mapDragActive =
     [getTargetsForKnob]
   );
 
-  const mapTargetCountsByKnobId = React.useMemo(() => {
-    const out = {};
-    for (const k of visibleKnobs) {
-      out[k.id] = getTargetsForKnob(k.id).length;
-    }
-    return out;
-  }, [visibleKnobs, getTargetsForKnob]);
-
   const renderValueFor = React.useCallback(
     (k) => {
       const id = k.id;
@@ -279,8 +279,8 @@ export function KnobRow({ knobs, busId, mappingArmed, onDropMap, mapDragActive =
 
   return (
     <div style={styles.rowOuter}>
-      <div style={styles.rowGrid(visibleKnobs.length)}>
-        {visibleKnobs.map((k) => (
+      <div style={styles.rowGrid(7)}>
+        {interactiveKnobs.map((k) => (
           <Knob
             key={k.id}
             id={k.id}
@@ -297,6 +297,15 @@ export function KnobRow({ knobs, busId, mappingArmed, onDropMap, mapDragActive =
             canAcceptMap={canAcceptMapForKnob(k.id)}
           />
         ))}
+        <button
+          type="button"
+          onClick={onToggleExpand}
+          style={styles.expandToggleBtn}
+          title="Toggle expanded knob row"
+        >
+          <span style={styles.expandToggleGlyph}>⇕</span>
+          <span style={styles.expandToggleText}>EXPAND</span>
+        </button>
       </div>
     </div>
   );
