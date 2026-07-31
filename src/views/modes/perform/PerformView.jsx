@@ -1,5 +1,5 @@
 import React from "react";
-import { useIntent } from "../../../core/useIntent";
+import { useNavigate } from "react-router-dom";
 import { useRfxStore } from "../../../core/rfx/Store";
 import { KnobRow } from "../../../components/controls/knobs/KnobRow";
 import { BusCardArea } from "./components/_index";
@@ -37,8 +37,7 @@ function readFxParam01(sources, fxGuid, paramIdx, fallback01 = 0.5) {
 }
 
 export function PerformView() {
-  const intent = useIntent();
-  const [knobRowExpanded, setKnobRowExpanded] = React.useState(false);
+  const navigate = useNavigate();
 
   const buses = useRfxStore((s) => s.perf?.buses ?? EMPTY_ARR);
 
@@ -47,8 +46,6 @@ export function PerformView() {
   );
 
   const busModesById = useRfxStore((s) => s.perf?.busModesById ?? EMPTY_OBJ);
-  const metersById = useRfxStore((s) => s.meters?.byId ?? EMPTY_OBJ);
-
   const knobValuesByBusId = useRfxStore(
     (s) => s.perf?.knobValuesByBusId ?? EMPTY_OBJ
   );
@@ -61,6 +58,9 @@ export function PerformView() {
   const sliderBusVolumeMapByBusId = useRfxStore((s) => s.perf?.sliderBusVolumeMapByBusId ?? EMPTY_OBJ);
   const setSliderBusVolumeMapping = useRfxStore((s) => s.setSliderBusVolumeMapping);
   const dispatchIntent = useRfxStore((s) => s.dispatchIntent);
+  const clearFxModuleNodeSelection = useRfxStore(
+    (s) => s.clearFxModuleNodeSelection
+  );
 
   const fxParamsOverlayByGuid = useRfxStore(
     (s) => s.ops?.overlay?.fxParamsByGuid ?? EMPTY_OBJ
@@ -83,6 +83,10 @@ export function PerformView() {
     [fxParamsOverlayByGuid, fxParamsByGuidSnapshot, fxParamsByGuidEntities]
   );
 
+  React.useEffect(() => {
+    clearFxModuleNodeSelection();
+  }, [clearFxModuleNodeSelection]);
+
   const vm = React.useMemo(() => {
     const first = buses?.[0]?.id ?? "NONE";
 
@@ -90,9 +94,8 @@ export function PerformView() {
       buses,
       activeBusId: activeBusId || first,
       busModes: busModesById,
-      meters: metersById,
     };
-  }, [buses, activeBusId, busModesById, metersById]);
+  }, [buses, activeBusId, busModesById]);
 
   const activeId = vm.activeBusId || "NONE";
 
@@ -114,6 +117,12 @@ export function PerformView() {
     if (!mappedBusId) return;
     dispatchIntent({ name: "setTrackVolume", trackGuid: normBusId(mappedBusId), value: clamp01(value01), phase: "commit", gestureId: `perfSlider:${activeId}` });
   }, [activeId, sliderBusVolumeMapByBusId, dispatchIntent]);
+
+  const onEditMacro = React.useCallback((knobId) => {
+    const match = String(knobId || "").match(/_k([1-7])$/);
+    if (!match || !activeId || activeId === "NONE") return;
+    navigate(`/macro-edit/${encodeURIComponent(activeId)}/${match[1]}`);
+  }, [activeId, navigate]);
 
 
   const knobs = React.useMemo(() => {
@@ -165,7 +174,7 @@ export function PerformView() {
         <div
           className={styles.Top}
           style={{
-            paddingBottom: knobRowExpanded ? 0 : KNOB_STRIP_H + 12,
+            paddingBottom: KNOB_STRIP_H + 12,
           }}
         >
           <BusCardArea
@@ -173,7 +182,6 @@ export function PerformView() {
             getRoutingMode={(busId) =>
               normalizeMode(vm?.busModes?.[busId] || "linear")
             }
-            onSelectBus={(busId) => intent({ name: "selectActiveBus", busId })}
             onDragMapBusVolume={() => {}}
           />
         </div>
@@ -185,9 +193,9 @@ export function PerformView() {
             left: 0,
             right: 0,
             bottom: 0,
-            top: knobRowExpanded ? 0 : "auto",
-            zIndex: knobRowExpanded ? 999 : 10,
-            height: knobRowExpanded ? "auto" : KNOB_STRIP_H,
+            top: "auto",
+            zIndex: 10,
+            height: KNOB_STRIP_H,
             overflow: "hidden",
             display: "flex",
             flexDirection: "column",
@@ -199,7 +207,7 @@ export function PerformView() {
             knobMapByBusId={knobMapByBusId}
             mappingArmed={mappingArmed}
             mapDragActive={false}
-            onExpandedChange={setKnobRowExpanded}
+            onEditMacro={onEditMacro}
             onDropMap={onDropMapToKnob}
             sliderBusVolumeTargetBusId={sliderBusVolumeMapByBusId?.[String(activeId || "")] || ""}
             onSliderMappedChange={onSliderChange}

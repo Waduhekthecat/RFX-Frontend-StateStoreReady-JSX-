@@ -4,3 +4,4 @@ export { VerticalMeter } from "./meters";
 export { MeterCard } from "./cards/MeterCard";
 export { TrackCard } from "./cards/TrackCard";
 export { MapCard } from "./MapCard";
+export { Module } from "./Module";

@@ -25,7 +25,29 @@ function asNum(x, fallback = 0) {
 }
 
 const LOOPER_TYPES = new Set(["pre-fx", "post-fx"]);
-const FX_MODULES_INSTRUMENTS = new Set(["Guitar", "Bass", "Vox", "Drums", "Synth"]);
+export const BUS_INSTRUMENTS = Object.freeze([
+  "Guitar",
+  "Bass",
+  "Vox",
+  "Drums",
+  "Synth",
+]);
+const BUS_INSTRUMENT_VALUES = new Set(BUS_INSTRUMENTS);
+const FX_MODULE_TYPE_VALUES = new Set([
+  "AMP",
+  "CAB",
+  "COMBO",
+  "SAT",
+  "DYN",
+  "MOD",
+  "TXR",
+  "SHAPE",
+  "ATMOS",
+  "SPACE",
+  "PITCH",
+  "CUSTOMFX",
+]);
+export const FX_MODULE_NODES_PER_LANE = 9;
 const LOOPER_STATUSES = new Set([
   "idle",
   "recording",
@@ -35,7 +57,119 @@ const LOOPER_STATUSES = new Set([
 ]);
 
 export const DEFAULT_LOOPER_TYPE = "post-fx";
-export const DEFAULT_FX_MODULES_INSTRUMENT = "Guitar";
+export const DEFAULT_BUS_INSTRUMENT = "Guitar";
+
+export function fxModuleNodeKey(busId, lane, nodeIndex) {
+  return `${String(busId || "")}:${String(lane || "").toUpperCase()}:${Number(nodeIndex)}`;
+}
+
+function normalizeFxModuleNode(node) {
+  const busId = asStr(node?.busId, "");
+  const lane = asStr(node?.lane, "").toUpperCase();
+  const nodeIndex = Number(node?.nodeIndex);
+  if (
+    !busId ||
+    !["A", "B", "C"].includes(lane) ||
+    !Number.isInteger(nodeIndex) ||
+    nodeIndex < 0 ||
+    nodeIndex >= FX_MODULE_NODES_PER_LANE
+  ) {
+    return null;
+  }
+  return { busId, lane, nodeIndex };
+}
+
+export function projectFxModuleBlockMove(blocksByNode, from, to) {
+  const source = normalizeFxModuleNode(from);
+  const target = normalizeFxModuleNode(to);
+  if (!source || !target) return blocksByNode;
+
+  const sourceKey = fxModuleNodeKey(
+    source.busId,
+    source.lane,
+    source.nodeIndex
+  );
+  const targetKey = fxModuleNodeKey(
+    target.busId,
+    target.lane,
+    target.nodeIndex
+  );
+  if (sourceKey === targetKey || !blocksByNode?.[sourceKey]) {
+    return blocksByNode;
+  }
+
+  const next = { ...(blocksByNode || {}) };
+  const sourceBlock = next[sourceKey];
+  const targetBlock = next[targetKey];
+  const sameRow =
+    source.busId === target.busId && source.lane === target.lane;
+
+  if (!targetBlock) {
+    delete next[sourceKey];
+    next[targetKey] = sourceBlock;
+  } else if (sameRow) {
+    if (source.nodeIndex < target.nodeIndex) {
+      for (let index = source.nodeIndex; index < target.nodeIndex; index += 1) {
+        const followingKey = fxModuleNodeKey(source.busId, source.lane, index + 1);
+        const currentKey = fxModuleNodeKey(source.busId, source.lane, index);
+        if (next[followingKey]) next[currentKey] = next[followingKey];
+        else delete next[currentKey];
+      }
+    } else {
+      for (let index = source.nodeIndex; index > target.nodeIndex; index -= 1) {
+        const previousKey = fxModuleNodeKey(source.busId, source.lane, index - 1);
+        const currentKey = fxModuleNodeKey(source.busId, source.lane, index);
+        if (next[previousKey]) next[currentKey] = next[previousKey];
+        else delete next[currentKey];
+      }
+    }
+    next[targetKey] = sourceBlock;
+  } else {
+    delete next[sourceKey];
+    const emptyIndices = [];
+    for (let index = 0; index < FX_MODULE_NODES_PER_LANE; index += 1) {
+      const key = fxModuleNodeKey(target.busId, target.lane, index);
+      if (!next[key]) emptyIndices.push(index);
+    }
+
+    if (emptyIndices.length) {
+      const emptyIndex = emptyIndices.reduce((nearest, index) => {
+        const distance = Math.abs(index - target.nodeIndex);
+        const nearestDistance = Math.abs(nearest - target.nodeIndex);
+        return distance < nearestDistance ? index : nearest;
+      }, emptyIndices[0]);
+
+      if (emptyIndex > target.nodeIndex) {
+        for (let index = emptyIndex; index > target.nodeIndex; index -= 1) {
+          const previousKey = fxModuleNodeKey(target.busId, target.lane, index - 1);
+          const currentKey = fxModuleNodeKey(target.busId, target.lane, index);
+          if (next[previousKey]) next[currentKey] = next[previousKey];
+          else delete next[currentKey];
+        }
+      } else {
+        for (let index = emptyIndex; index < target.nodeIndex; index += 1) {
+          const followingKey = fxModuleNodeKey(target.busId, target.lane, index + 1);
+          const currentKey = fxModuleNodeKey(target.busId, target.lane, index);
+          if (next[followingKey]) next[currentKey] = next[followingKey];
+          else delete next[currentKey];
+        }
+      }
+      next[targetKey] = sourceBlock;
+    } else {
+      next[sourceKey] = targetBlock;
+      next[targetKey] = sourceBlock;
+    }
+  }
+
+  return next;
+}
+
+const DEFAULT_BUS_INSTRUMENTS_BY_ID = Object.freeze({
+  FX_1: DEFAULT_BUS_INSTRUMENT,
+  FX_2: DEFAULT_BUS_INSTRUMENT,
+  FX_3: DEFAULT_BUS_INSTRUMENT,
+  FX_4: DEFAULT_BUS_INSTRUMENT,
+});
 
 export const DEFAULT_LOOPER_STATE = Object.freeze({
   status: "idle",
@@ -60,9 +194,9 @@ function asLooperTypeValue(value, fallback = DEFAULT_LOOPER_TYPE) {
   return LOOPER_TYPES.has(raw) ? raw : fallback;
 }
 
-function asFxModulesInstrument(value, fallback = DEFAULT_FX_MODULES_INSTRUMENT) {
+function asBusInstrument(value, fallback = DEFAULT_BUS_INSTRUMENT) {
   const raw = asStr(value, "");
-  return FX_MODULES_INSTRUMENTS.has(raw) ? raw : fallback;
+  return BUS_INSTRUMENT_VALUES.has(raw) ? raw : fallback;
 }
 
 function asLooperStatus(value, fallback = DEFAULT_LOOPER_STATE.status) {
@@ -424,6 +558,11 @@ function makeKnobTarget(payload) {
     targetMin01: targetRange.min01,
     targetMax01: targetRange.max01,
     invert: payload.invert === true,
+    rangeEnabled: payload.rangeEnabled === true,
+    curve: ["linear", "logarithmic", "exponential"].includes(payload.curve)
+      ? payload.curve
+      : "linear",
+    sensitivity: Math.max(0, Math.min(2, asNum(payload.sensitivity, 1))),
   };
 }
 
@@ -451,6 +590,11 @@ function sanitizeKnobTargetPatch(prevTarget, patch) {
     targetMin01: targetRange.min01,
     targetMax01: targetRange.max01,
     invert: next.invert === true,
+    rangeEnabled: next.rangeEnabled === true,
+    curve: ["linear", "logarithmic", "exponential"].includes(next.curve)
+      ? next.curve
+      : "linear",
+    sensitivity: Math.max(0, Math.min(2, asNum(next.sensitivity, 1))),
   };
 }
 
@@ -527,6 +671,10 @@ export const useRfxStore = create((set, get) => ({
     knobMapByBusId: {},
     mappingArmed: null,
     sliderBusVolumeMapByBusId: {},
+    instrumentByBusId: { ...DEFAULT_BUS_INSTRUMENTS_BY_ID },
+    selectedFxModuleNode: null,
+    fxModuleBlocksByNode: {},
+    copiedFxModuleBlock: null,
   },
 
   automation: {
@@ -541,7 +689,6 @@ export const useRfxStore = create((set, get) => ({
     selectedTrackGuid: null,
     selectedFxGuid: null,
     tunerMuted: true,
-    fxModulesInstrument: DEFAULT_FX_MODULES_INSTRUMENT,
     looperType: DEFAULT_LOOPER_TYPE,
     looper: { ...DEFAULT_LOOPER_STATE },
     tempoBpm: DEFAULT_SESSION_TEMPO_BPM,
@@ -743,18 +890,194 @@ export const useRfxStore = create((set, get) => ({
     }));
   },
 
-  setFxModulesInstrument: (instrument) => {
-    const nextInstrument = asFxModulesInstrument(instrument, "");
-    if (!nextInstrument) return;
+  setBusInstrument: ({ busId, instrument }) => {
+    const nextBusId = asStr(busId, "");
+    const nextInstrument = asBusInstrument(instrument, "");
+    if (!nextBusId || !nextInstrument) return;
     set((s) => ({
-      session: {
-        ...s.session,
-        fxModulesInstrument: nextInstrument,
+      perf: {
+        ...s.perf,
+        instrumentByBusId: {
+          ...(s.perf?.instrumentByBusId || {}),
+          [nextBusId]: nextInstrument,
+        },
       },
     }));
-    get().logEvent("fx_modules:instrument_updated", {
-      instrument: nextInstrument,
+  },
+
+  selectFxModuleNode: ({ busId, lane, nodeIndex }) => {
+    const nextBusId = asStr(busId, "");
+    const nextLane = asStr(lane, "").toUpperCase();
+    const nextNodeIndex = Number(nodeIndex);
+    if (
+      !nextBusId ||
+      !["A", "B", "C"].includes(nextLane) ||
+      !Number.isInteger(nextNodeIndex) ||
+      nextNodeIndex < 0 ||
+      nextNodeIndex >= FX_MODULE_NODES_PER_LANE
+    ) {
+      return;
+    }
+
+    set((s) => ({
+      perf: {
+        ...s.perf,
+        selectedFxModuleNode: {
+          busId: nextBusId,
+          lane: nextLane,
+          nodeIndex: nextNodeIndex,
+        },
+      },
+    }));
+  },
+
+  clearFxModuleNodeSelection: () => {
+    set((s) => {
+      if (!s.perf?.selectedFxModuleNode) return s;
+      return {
+        perf: {
+          ...s.perf,
+          selectedFxModuleNode: null,
+        },
+      };
     });
+  },
+
+  placeFxModuleAtSelectedNode: ({ type }) => {
+    const nextType = asStr(type, "").toUpperCase();
+    const target = get().perf?.selectedFxModuleNode;
+    if (!FX_MODULE_TYPE_VALUES.has(nextType) || !target) return null;
+
+    const key = fxModuleNodeKey(target.busId, target.lane, target.nodeIndex);
+    const block = {
+      id: uid("fx-module"),
+      type: nextType,
+    };
+
+    set((s) => ({
+      perf: {
+        ...s.perf,
+        fxModuleBlocksByNode: {
+          ...(s.perf?.fxModuleBlocksByNode || {}),
+          [key]: block,
+        },
+        selectedFxModuleNode: null,
+      },
+    }));
+
+    return block;
+  },
+
+  moveFxModuleBlock: ({ from, to }) => {
+    let moved = false;
+    set((s) => {
+      const current = s.perf?.fxModuleBlocksByNode || {};
+      const next = projectFxModuleBlockMove(current, from, to);
+      if (next === current) return s;
+      moved = true;
+      return {
+        perf: {
+          ...s.perf,
+          fxModuleBlocksByNode: next,
+        },
+      };
+    });
+
+    return moved;
+  },
+
+  toggleFxModuleBlockBypass: ({ busId, lane, nodeIndex }) => {
+    const key = fxModuleNodeKey(busId, lane, nodeIndex);
+    let bypassed = null;
+
+    set((s) => {
+      const current = s.perf?.fxModuleBlocksByNode || {};
+      const block = current[key];
+      if (!block) return s;
+
+      bypassed = !block.bypassed;
+      return {
+        perf: {
+          ...s.perf,
+          fxModuleBlocksByNode: {
+            ...current,
+            [key]: { ...block, bypassed },
+          },
+        },
+      };
+    });
+
+    return bypassed;
+  },
+
+  copyFxModuleBlock: ({ busId, lane, nodeIndex }) => {
+    const key = fxModuleNodeKey(busId, lane, nodeIndex);
+    const block = get().perf?.fxModuleBlocksByNode?.[key];
+    if (!block) return null;
+
+    const copiedBlock = { ...block };
+    delete copiedBlock.id;
+    set((s) => ({
+      perf: {
+        ...s.perf,
+        copiedFxModuleBlock: { ...copiedBlock },
+      },
+    }));
+
+    return copiedBlock;
+  },
+
+  pasteFxModuleBlock: ({ busId, lane, nodeIndex }) => {
+    const target = normalizeFxModuleNode({ busId, lane, nodeIndex });
+    const copiedBlock = get().perf?.copiedFxModuleBlock;
+    if (!target || !copiedBlock?.type) return null;
+
+    const key = fxModuleNodeKey(target.busId, target.lane, target.nodeIndex);
+    let pastedBlock = null;
+
+    set((s) => {
+      const current = s.perf?.fxModuleBlocksByNode || {};
+      if (current[key]) return s;
+
+      pastedBlock = {
+        ...copiedBlock,
+        id: uid("fx-module"),
+      };
+      return {
+        perf: {
+          ...s.perf,
+          fxModuleBlocksByNode: {
+            ...current,
+            [key]: pastedBlock,
+          },
+        },
+      };
+    });
+
+    return pastedBlock;
+  },
+
+  removeFxModuleBlock: ({ busId, lane, nodeIndex }) => {
+    const key = fxModuleNodeKey(busId, lane, nodeIndex);
+    let removed = false;
+
+    set((s) => {
+      const current = s.perf?.fxModuleBlocksByNode || {};
+      if (!current[key]) return s;
+
+      const next = { ...current };
+      delete next[key];
+      removed = true;
+
+      return {
+        perf: {
+          ...s.perf,
+          fxModuleBlocksByNode: next,
+        },
+      };
+    });
+
+    return removed;
   },
 
   setLooperStatus: (status) => {
@@ -1085,6 +1408,11 @@ export const useRfxStore = create((set, get) => ({
             knobMapByBusId: s.perf.knobMapByBusId || {},
             mappingArmed: s.perf.mappingArmed ?? null,
             sliderBusVolumeMapByBusId: s.perf.sliderBusVolumeMapByBusId || {},
+            instrumentByBusId:
+              s.perf.instrumentByBusId || { ...DEFAULT_BUS_INSTRUMENTS_BY_ID },
+            selectedFxModuleNode: s.perf.selectedFxModuleNode ?? null,
+            fxModuleBlocksByNode: s.perf.fxModuleBlocksByNode || {},
+            copiedFxModuleBlock: s.perf.copiedFxModuleBlock ?? null,
           }
           : {
             ...s.perf,

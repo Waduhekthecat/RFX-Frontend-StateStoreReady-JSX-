@@ -3,10 +3,13 @@ import { NavLink } from "react-router-dom";
 import { styles, cx } from "./_styles";
 import { modeManager } from "../../core/modes/ModeManager";
 import { RFX_MODES } from "../../core/modes/Modes";
+import rfxFullColorLogo from "../../assets/RFX_FullColor_Logo.png";
 
 const BASE_TABS = [
   { label: "Perform", to: "/", mode: RFX_MODES.PERFORM },
   { label: "FX", to: "/fx-modules" },
+  { label: "Presets", to: "/presets" },
+  { label: "Instrument", to: "/instrument" },
   { label: "Edit", to: "/edit", mode: RFX_MODES.EDIT },
   { label: "Looper", to: "/looper", mode: RFX_MODES.LOOPER },
   { label: "Automation", to: "/automation", mode: RFX_MODES.AUTOMATION },
@@ -48,7 +51,11 @@ export function Nav() {
     <div className={styles.wrap}>
       {/* LEFT */}
       <div className={styles.left}>
-        <div className={styles.brand}>RFX</div>
+        <img
+          src={rfxFullColorLogo}
+          alt="RFX"
+          className={styles.brandLogo}
+        />
         <div className={styles.env}>Beta</div>
 
       </div>

@@ -13,6 +13,11 @@ const EMPTY = Object.freeze({});
 const EMPTY_ARR = Object.freeze([]);
 const EMPTY_OBJ = Object.freeze({});
 
+function busIdFromTrackGuid(trackGuid) {
+  const match = String(trackGuid || "").match(/^([A-Za-z0-9_]+)[ABC]$/);
+  return match?.[1] || "";
+}
+
 function normalizeKnobTargets(raw) {
   if (!raw) return EMPTY_ARR;
   return Array.isArray(raw) ? raw : [raw];
@@ -58,8 +63,12 @@ export function PluginView() {
   const trackGuid = React.useMemo(() => canonicalTrackGuid(trackId), [trackId]);
   const fxGuid = String(fxId || "");
 
-  const activeBusId = useRfxStore(
+  const storeActiveBusId = useRfxStore(
     (s) => s.perf?.activeBusId || s.meters?.activeBusId || null
+  );
+  const busId = React.useMemo(
+    () => busIdFromTrackGuid(trackGuid) || String(storeActiveBusId || ""),
+    [trackGuid, storeActiveBusId]
   );
 
   const knobValuesByBusId = useRfxStore((s) => s.perf?.knobValuesByBusId || EMPTY_OBJ);
@@ -124,10 +133,6 @@ export function PluginView() {
   const [dragMappingParam, setDragMappingParam] = React.useState(null);
   const [mapDragGlowActive, setMapDragGlowActive] = React.useState(false);
 
-  const [knobRowExpanded, setKnobRowExpanded] = React.useState(false);
-
-  const bottomBusId = String(activeBusId || "NONE");
-
   const clearMapDragState = React.useCallback(() => {
     setMapDragGlowActive(false);
     setDragMappingParam(null);
@@ -146,6 +151,12 @@ export function PluginView() {
   const onMapDragEnd = React.useCallback(() => {
     clearMapDragState();
   }, [clearMapDragState]);
+
+  const onEditMacro = React.useCallback((knobId) => {
+    const match = String(knobId || "").match(/_k([1-7])$/);
+    if (!match || !busId) return;
+    nav(`/macro-edit/${encodeURIComponent(busId)}/${match[1]}`);
+  }, [busId, nav]);
 
   const onRootDragOver = React.useCallback(
     (e) => {
@@ -190,7 +201,6 @@ export function PluginView() {
 
   const onDropMapToKnob = React.useCallback(
     (knobId, payload) => {
-      const busId = String(activeBusId || "");
       if (!busId || !knobId) return;
 
       setMapDragGlowActive(false);
@@ -261,7 +271,7 @@ export function PluginView() {
       setDragMappingParam(null);
     },
     [
-      activeBusId,
+      busId,
       dragMappingParam,
       fxGuid,
       params,
@@ -275,7 +285,6 @@ export function PluginView() {
   );
 
   const mappedKnobsByParamIdx = React.useMemo(() => {
-    const busId = String(activeBusId || "");
     if (!busId) return EMPTY_OBJ;
 
     const maps = knobMapByBusId?.[busId] || EMPTY_OBJ;
@@ -302,7 +311,7 @@ export function PluginView() {
     for (const k of Object.keys(out)) out[k].sort();
 
     return out;
-  }, [activeBusId, knobMapByBusId, fxGuid]);
+  }, [busId, knobMapByBusId, fxGuid]);
 
   React.useEffect(() => {
     if (!fxGuid) return;
@@ -353,14 +362,13 @@ export function PluginView() {
 
   const onUnmap = React.useCallback(
     (p) => {
-      const busId = String(activeBusId || "");
       const idx = Number(p?.idx);
 
       if (!busId || !Number.isFinite(idx)) return;
 
       unmapParamFromBus?.({ busId, fxGuid, paramIdx: idx });
     },
-    [activeBusId, unmapParamFromBus, fxGuid]
+    [busId, unmapParamFromBus, fxGuid]
   );
 
   const onAutomate = React.useCallback(
@@ -403,7 +411,8 @@ export function PluginView() {
   );
 
   const bottomKnobs = React.useMemo(() => {
-    const busId = bottomBusId;
+    if (!busId) return EMPTY_ARR;
+
     const values = knobValuesByBusId?.[busId] || EMPTY_OBJ;
     const maps = knobMapByBusId?.[busId] || EMPTY_OBJ;
 
@@ -446,7 +455,7 @@ export function PluginView() {
         mappedLabel,
       };
     });
-  }, [bottomBusId, knobValuesByBusId, knobMapByBusId, fxParamSources]);
+  }, [busId, knobValuesByBusId, knobMapByBusId, fxParamSources]);
 
   return (
     <div
@@ -471,7 +480,7 @@ export function PluginView() {
 
         <div
           className="p-0 min-h-0 flex-1 overflow-auto"
-          style={{ paddingBottom: knobRowExpanded ? 0 : KNOB_STRIP_H + 12 }}
+          style={{ marginBottom: KNOB_STRIP_H + 12 }}
         >
           {!manifest ? (
             <div className="text-white/45 text-[12px]">Loading parameters…</div>
@@ -517,21 +526,23 @@ export function PluginView() {
             left: 0,
             right: 0,
             bottom: 0,
-            top: knobRowExpanded ? 0 : "auto",
-            zIndex: knobRowExpanded ? 999 : 10,
-            height: knobRowExpanded ? "auto" : KNOB_STRIP_H,
+            top: "auto",
+            zIndex: 10,
+            height: KNOB_STRIP_H,
             overflow: "hidden",
           }}
         >
-          <KnobRow
-            knobs={bottomKnobs}
-            busId={bottomBusId}
-            knobMapByBusId={knobMapByBusId}
-            mappingArmed={mappingArmed}
-            onDropMap={onDropMapToKnob}
-            mapDragActive={mapDragGlowActive}
-            onExpandedChange={setKnobRowExpanded}
-          />
+          {busId ? (
+            <KnobRow
+              knobs={bottomKnobs}
+              busId={busId}
+              knobMapByBusId={knobMapByBusId}
+              mappingArmed={mappingArmed}
+              onDropMap={onDropMapToKnob}
+              mapDragActive={mapDragGlowActive}
+              onEditMacro={onEditMacro}
+            />
+          ) : null}
         </div>
       </div>
     </div>

@@ -1,7 +1,12 @@
 import React from "react";
 import { clamp01 } from "../../../core/DomainHelpers";
 import knobStripUrl from "../../../assets/knobSpriteStrip.png";
-import { styles, SPRITE_FRAMES, RENDER_SIZE, CENTER_FRAME } from "./_styles";
+import {
+  styles,
+  SPRITE_FRAMES,
+  RENDER_SIZE,
+  CENTER_FRAME,
+} from "./_styles";
 
 function valueToFrame(v01, frames) {
   const v = clamp01(v01);
@@ -269,18 +274,37 @@ export function Knob({
   const frameRenderH = srcFrameH * scale;
   const y = -frameIndex * frameRenderH;
 
-  const containerW = Math.max(120, RENDER_SIZE + 28);
-
   return (
-    // <div style={styles.knobWrap(containerW)}>
     <div
       style={{
-        ...styles.knobWrap(containerW),
+        ...styles.knobWrap,
         opacity: dimmed ? 0.45 : 1,
         filter: dimmed ? "saturate(0.7)" : "none",
         // transition: "opacity 180ms ease, filter 180ms ease",
         transform: `translateY(${yOffset}px)`,
         transition: "opacity 180ms ease, filter 180ms ease, transform 180ms ease",
+      }}
+      onDragEnter={(e) => {
+        if (!onDropMap || !canAcceptMap) return;
+        e.preventDefault();
+        setMapDragOver(true);
+      }}
+      onDragOver={(e) => {
+        if (!onDropMap || !canAcceptMap) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+        if (!mapDragOver) setMapDragOver(true);
+      }}
+      onDragLeave={() => {
+        if (mapDragOver) setMapDragOver(false);
+      }}
+      onDrop={(e) => {
+        setMapDragOver(false);
+        if (!onDropMap || !canAcceptMap) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const payload = e.dataTransfer?.getData("text/plain") || "";
+        onDropMap?.(id, payload);
       }}
     >
       <div
@@ -294,28 +318,6 @@ export function Knob({
         // style={styles.knobFace({ dragging, mapDragActive, canAcceptMap, mapDragOver, pressing })}
         style={styles.knobFace({ dragging, mapDragActive, canAcceptMap, mapDragOver, pressing, interactive })}
 
-        onDragEnter={(e) => {
-          if (!onDropMap || !canAcceptMap) return;
-          e.preventDefault();
-          setMapDragOver(true);
-        }}
-        onDragOver={(e) => {
-          if (!onDropMap || !canAcceptMap) return;
-          e.preventDefault();
-          if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
-          if (!mapDragOver) setMapDragOver(true);
-        }}
-        onDragLeave={() => {
-          if (mapDragOver) setMapDragOver(false);
-        }}
-        onDrop={(e) => {
-          setMapDragOver(false);
-          if (!onDropMap || !canAcceptMap) return;
-          e.preventDefault();
-          e.stopPropagation();
-          const payload = e.dataTransfer?.getData("text/plain") || "";
-          onDropMap?.(id, payload);
-        }}
       >
         <img
           src={knobStripUrl}

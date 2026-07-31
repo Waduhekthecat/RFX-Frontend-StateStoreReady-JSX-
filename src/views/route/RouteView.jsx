@@ -1,5 +1,7 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTransportVM } from "../../core/useTransportVM";
+import { useIntent } from "../../core/useIntent";
+import { useRfxStore } from "../../core/rfx/Store";
 import { normalizeMode, availableLanes } from "../../core/DomainHelpers";
 
 import { Card, MiniLabel, NodePill } from "./components/_index";
@@ -40,6 +42,22 @@ function busIdOf(bus, i) {
   return norm(bus?.id) || norm(bus?.busId) || norm(bus?.name) || `FX_${i + 1}`;
 }
 
+function BusSelectButton({ busId, active, onSelect }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={() => onSelect(busId)}
+      className={[
+        styles.busSelectButton,
+        active ? styles.busSelectButtonActive : styles.busSelectButtonIdle,
+      ].join(" ")}
+    >
+      {busId}
+    </button>
+  );
+}
+
 // ----------------------------
 // Armed detection (best-effort)
 // ----------------------------
@@ -73,10 +91,26 @@ function isLaneArmed(vm, busId, laneLetter) {
 // ----------------------------
 export function RouteView() {
   const vm = useTransportVM();
+  const intent = useIntent();
+  const storeActiveBusId = useRfxStore(
+    (state) =>
+      state.ops?.overlay?.perf?.activeBusId ??
+      state.ops?.overlay?.session?.activeBusId ??
+      state.perf?.activeBusId ??
+      state.session?.activeBusId ??
+      state.meters?.activeBusId ??
+      null
+  );
 
   const buses = useMemo(() => extractBuses(vm), [vm]);
-  const activeBusId = norm(vm?.activeBusId || "");
-  const busModes = vm?.busModes || {};
+  const activeBusId = norm(
+    storeActiveBusId ||
+    vm?.activeBusId ||
+    vm?.perf?.activeBusId ||
+    vm?.session?.activeBusId ||
+    ""
+  );
+  const busModes = useMemo(() => vm?.busModes || {}, [vm?.busModes]);
 
   const rows = useMemo(() => {
     return buses.slice(0, 4).map((b, i) => {
@@ -208,6 +242,10 @@ export function RouteView() {
     return result;
   }, [layout, rows, activeBusId, laneIdsByBus]);
 
+  const selectBus = React.useCallback((busId) => {
+    intent({ name: "selectActiveBus", busId });
+  }, [intent]);
+
   return (
     <div className={styles.wrap}>
       <div className={styles.body}>
@@ -316,6 +354,17 @@ export function RouteView() {
                 </div>
               </div>
             </div>
+          </div>
+
+          <div className={styles.busSelector} aria-label="Select active bus">
+            {rows.map((row) => (
+              <BusSelectButton
+                active={row.id === activeBusId}
+                busId={row.id}
+                key={row.id}
+                onSelect={selectBus}
+              />
+            ))}
           </div>
         </Card>
       </div>

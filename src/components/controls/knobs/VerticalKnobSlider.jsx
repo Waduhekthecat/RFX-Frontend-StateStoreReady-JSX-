@@ -19,6 +19,7 @@ function setGlobalDragLock(on) {
 const SMOOTH_ALPHA = 0.38;
 const SMOOTH_EPS = 0.0008;
 const DRAG_PIXELS_FOR_FULL_SWEEP = 140;
+const SLIDER_VISUAL_WIDTH = 40;
 
 export function VerticalKnobSlider({
   id,
@@ -237,16 +238,37 @@ export function VerticalKnobSlider({
   }
 
   const sliderValue = clamp01(displayValue);
-  const containerW = 120;
 
   return (
     <div
       style={{
-        ...styles.knobWrap(containerW),
+        ...styles.knobWrap,
         opacity: dimmed ? 0.45 : 1,
         filter: dimmed ? "saturate(0.7)" : "none",
         transform: `translateY(${yOffset}px)`,
         transition: "opacity 180ms ease, filter 180ms ease, transform 180ms ease",
+      }}
+      onDragEnter={(e) => {
+        if (!onDropMap || !canAcceptMap) return;
+        e.preventDefault();
+        setMapDragOver(true);
+      }}
+      onDragOver={(e) => {
+        if (!onDropMap || !canAcceptMap) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+        if (!mapDragOver) setMapDragOver(true);
+      }}
+      onDragLeave={() => {
+        if (mapDragOver) setMapDragOver(false);
+      }}
+      onDrop={(e) => {
+        setMapDragOver(false);
+        if (!onDropMap || !canAcceptMap) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const payload = e.dataTransfer?.getData("text/plain") || "";
+        onDropMap?.(id, payload);
       }}
     >
       <div
@@ -256,28 +278,16 @@ export function VerticalKnobSlider({
         onPointerCancel={onPointerCancel}
         onLostPointerCapture={onLostPointerCapture}
         className="select-none"
-        style={styles.knobFace({ dragging, mapDragActive, canAcceptMap, mapDragOver, pressing, interactive })}
-        onDragEnter={(e) => {
-          if (!onDropMap || !canAcceptMap) return;
-          e.preventDefault();
-          setMapDragOver(true);
-        }}
-        onDragOver={(e) => {
-          if (!onDropMap || !canAcceptMap) return;
-          e.preventDefault();
-          if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
-          if (!mapDragOver) setMapDragOver(true);
-        }}
-        onDragLeave={() => {
-          if (mapDragOver) setMapDragOver(false);
-        }}
-        onDrop={(e) => {
-          setMapDragOver(false);
-          if (!onDropMap || !canAcceptMap) return;
-          e.preventDefault();
-          e.stopPropagation();
-          const payload = e.dataTransfer?.getData("text/plain") || "";
-          onDropMap?.(id, payload);
+        style={{
+          ...styles.knobFace({
+            dragging,
+            mapDragActive,
+            canAcceptMap,
+            mapDragOver,
+            pressing,
+            interactive,
+          }),
+          width: SLIDER_VISUAL_WIDTH,
         }}
       >
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>

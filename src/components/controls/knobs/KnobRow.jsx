@@ -1,15 +1,15 @@
 import React from "react";
-import { clamp01 } from "../../../core/DomainHelpers";
+import { clamp01, mapMacroTargetValue01 } from "../../../core/DomainHelpers";
 import { Knob } from "./Knob";
 import { VerticalKnobSlider } from "./VerticalKnobSlider";
 import { styles } from "./_styles";
 import { useRfxStore } from "../../../core/rfx/Store";
-import { Panel } from "../../ui/Panel";
 import { MapCard } from "../../ui/MapCard";
+import { Module } from "../../ui/Module";
 
 const EMPTY_OBJ = Object.freeze({});
 const MAX_NUMBER_MAPPABLE = 3;
-const COLLAPSED_H = 194;
+const COLLAPSED_H = 185;
 const EXPANDED_H = 740;
 function normalizeTargets(raw) {
   if (!raw) return [];
@@ -48,7 +48,7 @@ export function KnobRow({
   mappingArmed,
   onDropMap,
   mapDragActive = false,
-  onExpandedChange,
+  onEditMacro,
   sliderBusVolumeTargetBusId = "",
   onSliderMappedChange,
   onSliderMappedCommit,
@@ -130,7 +130,6 @@ export function KnobRow({
   const [localValues, setLocalValues] = React.useState(() => ({}));
   const localValuesRef = React.useRef({});
   const activeLocalKnobsRef = React.useRef(new Set());
-  const groupedGestureStateRef = React.useRef({});
   const [draggingRowIdx, setDraggingRowIdx] = React.useState(null);
   const dragStateRef = React.useRef({
     active: false,
@@ -178,12 +177,6 @@ export function KnobRow({
 
       const v01 = clamp01(next01);
 
-      const prevKnob = clamp01(
-        Number.isFinite(localValuesRef.current?.[knobId])
-          ? localValuesRef.current[knobId]
-          : v01
-      );
-
       activeLocalKnobsRef.current.add(knobId);
 
       setLocalValues((prev) => {
@@ -200,10 +193,8 @@ export function KnobRow({
       const targets = getTargetsForKnob(knobId);
       if (!targets.length) return;
 
-      if (targets.length === 1) {
-        const target = targets[0];
-        if (!target?.fxGuid || !Number.isFinite(Number(target?.paramIdx))) return;
-
+      for (const target of targets) {
+        if (!target?.fxGuid || !Number.isFinite(Number(target?.paramIdx))) continue;
         dispatchIntent({
           name: "setParamValue",
           phase: "preview",
@@ -211,73 +202,11 @@ export function KnobRow({
           trackGuid: target.trackGuid,
           fxGuid: String(target.fxGuid),
           paramIdx: Number(target.paramIdx),
-          value01: target?.invert === true ? clamp01(1 - v01) : v01,
-        });
-
-        return;
-      }
-
-      const requestedDelta = v01 - prevKnob;
-      if (!Number.isFinite(requestedDelta) || Math.abs(requestedDelta) < 0.000001) return;
-
-      const existing = groupedGestureStateRef.current?.[knobId] || {};
-      const valuesByTargetKey = { ...(existing.valuesByTargetKey || {}) };
-      const normalizedTargets = [];
-
-      for (const target of targets) {
-        if (!target?.fxGuid || !Number.isFinite(Number(target?.paramIdx))) continue;
-
-        const fxGuid = String(target.fxGuid);
-        const paramIdx = Number(target.paramIdx);
-        const targetKey = `${String(target.trackGuid || "")}|${fxGuid}|${paramIdx}`;
-
-        if (!Number.isFinite(valuesByTargetKey[targetKey])) {
-          valuesByTargetKey[targetKey] = readFxParam01(fxParamSources, fxGuid, paramIdx, v01);
-        }
-
-        normalizedTargets.push({ ...target, fxGuid, paramIdx, targetKey });
-      }
-
-      if (!normalizedTargets.length) return;
-
-      let minDelta = -1;
-      let maxDelta = 1;
-
-      for (const target of normalizedTargets) {
-        const currentValue = clamp01(valuesByTargetKey[target.targetKey]);
-
-        if (target?.invert === true) {
-          minDelta = Math.max(minDelta, currentValue - 1);
-          maxDelta = Math.min(maxDelta, currentValue);
-        } else {
-          minDelta = Math.max(minDelta, -currentValue);
-          maxDelta = Math.min(maxDelta, 1 - currentValue);
-        }
-      }
-
-      const appliedDelta = Math.max(minDelta, Math.min(maxDelta, requestedDelta));
-      if (Math.abs(appliedDelta) < 0.000001) return;
-
-      for (const target of normalizedTargets) {
-        const signedDelta = target?.invert === true ? -appliedDelta : appliedDelta;
-        const nextValue = clamp01(valuesByTargetKey[target.targetKey] + signedDelta);
-
-        valuesByTargetKey[target.targetKey] = nextValue;
-
-        dispatchIntent({
-          name: "setParamValue",
-          phase: "preview",
-          gestureId: `knob:${busKey}:${knobId}`,
-          trackGuid: target.trackGuid,
-          fxGuid: target.fxGuid,
-          paramIdx: target.paramIdx,
-          value01: nextValue,
+          value01: mapMacroTargetValue01(v01, target),
         });
       }
-
-      groupedGestureStateRef.current[knobId] = { valuesByTargetKey };
     },
-    [busKey, dispatchIntent, expanded, expandedKnobId, getTargetsForKnob, setKnobValueLocal, fxParamSources, sliderBusVolumeTargetBusId, onSliderMappedChange]
+    [busKey, dispatchIntent, expanded, expandedKnobId, getTargetsForKnob, setKnobValueLocal, sliderBusVolumeTargetBusId, onSliderMappedChange]
   );
 
   const onKnobCommit = React.useCallback(
@@ -287,7 +216,6 @@ export function KnobRow({
       activeLocalKnobsRef.current.delete(knobId);
 
       const targets = getTargetsForKnob(knobId);
-      const grouped = groupedGestureStateRef.current?.[knobId] || null;
       const latestValue = clamp01(localValuesRef.current?.[knobId]);
 
       for (const target of targets) {
@@ -295,14 +223,6 @@ export function KnobRow({
 
         const fxGuid = String(target.fxGuid);
         const paramIdx = Number(target.paramIdx);
-        const targetKey = `${String(target.trackGuid || "")}|${fxGuid}|${paramIdx}`;
-
-        const commitValue = Number.isFinite(grouped?.valuesByTargetKey?.[targetKey])
-          ? clamp01(grouped.valuesByTargetKey[targetKey])
-          : target?.invert === true
-            ? clamp01(1 - latestValue)
-            : latestValue;
-
         dispatchIntent({
           name: "setParamValue",
           phase: "commit",
@@ -310,11 +230,9 @@ export function KnobRow({
           trackGuid: target.trackGuid,
           fxGuid,
           paramIdx,
-          value01: commitValue,
+          value01: mapMacroTargetValue01(latestValue, target),
         });
       }
-
-      delete groupedGestureStateRef.current[knobId];
     },
     [busKey, dispatchIntent, expanded, expandedKnobId, getTargetsForKnob]
   );
@@ -512,16 +430,12 @@ export function KnobRow({
   //   setExpandedKnobId(null);
   // }, [onExpandedChange]);
 
-  const onKnobLongPressExpand = React.useCallback(
+  const onKnobLongPressEdit = React.useCallback(
     (knobId) => {
-      setExpandedKnobId(knobId);
-      if (!expanded) {
-        setExpanded(true);
-        onExpandedChange?.(true);
-      }
+      if (!knobHasMappedTarget(knobId)) return;
+      onEditMacro?.(knobId);
     },
-    [expanded, onExpandedChange]
-    // [expanded, onExpandedChange]
+    [knobHasMappedTarget, onEditMacro]
   );
 
   const canAcceptMapForKnob = React.useCallback(
@@ -539,7 +453,7 @@ export function KnobRow({
       if (expanded) {
       setExpanded(false);
       }
-  }, [expanded, onExpandedChange]);
+  }, [expanded]);
 
   React.useEffect(() => {
     // if (expanded && !hasAnyMappedTargets) {
@@ -577,35 +491,9 @@ export function KnobRow({
         minHeight: 0,
       }}
     >
-      <Panel
-        style={{
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          position: "relative",
-          background: `
-          linear-gradient(
-            180deg,
-            rgba(255,255,255,0.08),
-            rgba(255,255,255,0.02) 0%,
-            rgba(0,0,0,0.45)
-          ),
-          repeating-linear-gradient(
-            90deg,
-            rgba(255,255,255,0.03) 0px,
-            rgba(255,255,255,0.03) 1px,
-            transparent 1px,
-            transparent 3px
-          ),
-          #1a1a1a
-        `,
-          boxShadow: `
-          inset 0 1px 0 rgba(255,255,255,0.20),
-          inset 0 -8px 18px rgba(0,0,0,0.7),
-          0 20px 40px rgba(0,0,0,0.6)
-        `,
-        }}
+      <Module
+        height="100%"
+        contentClassName="flex flex-col overflow-hidden"
       >
         <div
           style={{
@@ -619,8 +507,6 @@ export function KnobRow({
             style={{
               ...styles.rowGrid(7),
               height: "100%",
-              background: "transparent",
-              boxShadow: "none",
             }}
           >
             {rotaryKnobs.map((k) => (
@@ -638,7 +524,7 @@ export function KnobRow({
                 onDropMap={onDropMap}
                 mapDragActive={mapDragActive}
                 canAcceptMap={canAcceptMapForKnob(k.id)}
-                onLongPress={() => onKnobLongPressExpand(k.id)}
+                onLongPress={() => onKnobLongPressEdit(k.id)}
                 interactive={
                   mappingArmed ||
                   (knobHasMappedTarget(k.id) && (!expanded || expandedKnobId === k.id))
@@ -671,7 +557,7 @@ export function KnobRow({
                 onDropMap={onDropMap}
                 mapDragActive={mapDragActive}
                 canAcceptMap={canAcceptMapForKnob(sliderKnob.id)}
-                onLongPress={() => onKnobLongPressExpand(sliderKnob.id)}
+                onLongPress={() => onKnobLongPressEdit(sliderKnob.id)}
                 interactive={
                   mappingArmed ||
                    ((knobHasMappedTarget(sliderKnob.id) || !!sliderBusVolumeTargetBusId) &&
@@ -796,6 +682,7 @@ export function KnobRow({
             </div>
           </div>
         </div>
-      </Panel></div>
+      </Module>
+    </div>
   );
 }

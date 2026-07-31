@@ -1136,7 +1136,9 @@ local function exec_addFx(payload)
   local beforeCount = reaper.TrackFX_GetCount(tr)
   log_debug("exec_addFx beforeCount=" .. tostring(beforeCount))
 
-  local fxIndex = reaper.TrackFX_AddByName(tr, resolvedRaw, false, 1)
+  -- instantiate = -1 always creates a new instance, even when this FX is
+  -- already present on the track.
+  local fxIndex = reaper.TrackFX_AddByName(tr, resolvedRaw, false, -1)
   log_debug("exec_addFx TrackFX_AddByName result fxIndex=" .. tostring(fxIndex))
   log_debug("exec_addFx resolvedRaw=" .. tostring(resolvedRaw))
 

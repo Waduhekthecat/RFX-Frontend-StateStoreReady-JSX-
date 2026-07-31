@@ -17,6 +17,30 @@ export function nearlyEqual(a, b, eps) {
   return Math.abs(a - b) <= eps;
 }
 
+export function mapMacroTargetValue01(macroValue01, target = {}) {
+  const sourceMin = clamp01(target.sourceMin01 ?? 0);
+  const sourceMax = Math.max(sourceMin, clamp01(target.sourceMax01 ?? 1));
+  const sourceSpan = Math.max(0.000001, sourceMax - sourceMin);
+  let value = clamp01((clamp01(macroValue01) - sourceMin) / sourceSpan);
+
+  if (target.invert === true) value = 1 - value;
+
+  const curve = String(target.curve || "linear").toLowerCase();
+  if (curve === "logarithmic") value = Math.log1p(9 * value) / Math.log(10);
+  else if (curve === "exponential") value = (Math.pow(10, value) - 1) / 9;
+
+  const sensitivity = Math.max(0, Math.min(2, Number(target.sensitivity ?? 1)));
+  value = clamp01(0.5 + (value - 0.5) * sensitivity);
+
+  if (target.rangeEnabled === true) {
+    const targetMin = clamp01(target.targetMin01 ?? 0);
+    const targetMax = Math.max(targetMin, clamp01(target.targetMax01 ?? 1));
+    value = targetMin + value * (targetMax - targetMin);
+  }
+
+  return clamp01(value);
+}
+
 // ─── Routing mode ───────────────────────────────────────────────────────────
 
 /** @param {string|undefined} m @returns {"linear"|"parallel"|"lcr"} */

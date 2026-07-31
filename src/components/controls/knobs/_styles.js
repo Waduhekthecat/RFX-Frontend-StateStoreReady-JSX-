@@ -6,13 +6,16 @@ export const CENTER_FRAME = 96; // “straight up” frame index in the strip
 
 export const styles = {
   // ---- Knob ----
-  knobWrap: (containerW) => ({
-    width: containerW,
+  knobWrap: {
+    width: "100%",
+    height: "100%",
+    minWidth: 0,
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
     gap: 0,
-  }),
+    boxSizing: "border-box",
+  },
 
   // knobFace: ({ dragging, mapDragActive, canAcceptMap, mapDragOver, longPressing }) => ({    
   // knobFace: ({ dragging, mapDragActive, canAcceptMap, mapDragOver, pressing }) => ({    
@@ -90,32 +93,12 @@ export const styles = {
     width: "100%",
     height: "100%",
     display: "grid",
-    gridTemplateColumns: `repeat(${count || 1}, 1fr)`,
-    justifyItems: "center",
+    gridTemplateColumns: `repeat(${count || 1}, minmax(0, 1fr))`,
     alignItems: "start",
-    padding: "20px 36px",
+    boxSizing: "border-box",
+    paddingBlock: 20,
+    paddingInline: 0,
     borderRadius: 13,
-    background: `
-      linear-gradient(
-        180deg,
-        rgba(255,255,255,0.08),
-        rgba(255,255,255,0.02) 0%,
-        rgba(0,0,0,0.45)
-      ),
-      repeating-linear-gradient(
-        90deg,
-        rgba(255,255,255,0.03) 0px,
-        rgba(255,255,255,0.03) 1px,
-        transparent 1px,
-        transparent 3px
-      ),
-      #1a1a1a
-    `,
-    boxShadow: `
-      inset 0 1px 0 rgba(255,255,255,0.20),
-      inset 0 -8px 18px rgba(0,0,0,0.7),
-      0 20px 40px rgba(0,0,0,0.6)
-    `,
   }),
 
   expandToggleBtn: {

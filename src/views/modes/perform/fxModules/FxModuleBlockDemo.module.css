@@ -1,0 +1,63 @@
+.page {
+  height: 100%;
+  padding: 18px;
+  overflow: auto;
+  color: #f3f5f7;
+  background:
+    radial-gradient(circle at 15% 0, rgba(75, 88, 104, 0.18), transparent 32%),
+    #0d1014;
+}
+
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.header h1 {
+  margin: 2px 0 0;
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+
+.header > p,
+.eyebrow,
+.stateExample > span {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.page section + section {
+  margin-top: 22px;
+}
+
+.page h2 {
+  margin: 0 0 9px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.stateGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.stateExample {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+}
+
